@@ -1,0 +1,93 @@
+{
+  "model": "RandomForestClassifier",
+  "random_seed": 42,
+  "dataset_seed": 20261112,
+  "rows_total": 8000,
+  "rows_train": 6000,
+  "rows_test": 2000,
+  "features": [
+    "Vibration RMS (g)",
+    "Voltage (V)",
+    "Current (A)",
+    "Temperature (\u00b0C)"
+  ],
+  "classes": [
+    "Normal",
+    "Mechanical anomaly",
+    "Electrical anomaly",
+    "Thermal anomaly"
+  ],
+  "synthetic_holdout_accuracy": 0.9215,
+  "classification_report": {
+    "Normal": {
+      "precision": 0.8507462686567164,
+      "recall": 0.912,
+      "f1-score": 0.8803088803088803,
+      "support": 500.0
+    },
+    "Mechanical anomaly": {
+      "precision": 0.9693251533742331,
+      "recall": 0.948,
+      "f1-score": 0.9585439838220424,
+      "support": 500.0
+    },
+    "Electrical anomaly": {
+      "precision": 0.9197530864197531,
+      "recall": 0.894,
+      "f1-score": 0.9066937119675457,
+      "support": 500.0
+    },
+    "Thermal anomaly": {
+      "precision": 0.9529652351738241,
+      "recall": 0.932,
+      "f1-score": 0.942366026289181,
+      "support": 500.0
+    },
+    "accuracy": 0.9215,
+    "macro avg": {
+      "precision": 0.9231974359061317,
+      "recall": 0.9215,
+      "f1-score": 0.9219781505969123,
+      "support": 2000.0
+    },
+    "weighted avg": {
+      "precision": 0.9231974359061317,
+      "recall": 0.9215,
+      "f1-score": 0.9219781505969125,
+      "support": 2000.0
+    }
+  },
+  "confusion_matrix_labels": [
+    "Normal",
+    "Mechanical anomaly",
+    "Electrical anomaly",
+    "Thermal anomaly"
+  ],
+  "confusion_matrix": [
+    [
+      456,
+      5,
+      25,
+      14
+    ],
+    [
+      14,
+      474,
+      8,
+      4
+    ],
+    [
+      41,
+      7,
+      447,
+      5
+    ],
+    [
+      25,
+      3,
+      6,
+      466
+    ]
+  ],
+  "warning": "Holdout metrics measure performance on a synthetic dataset generated from the same assumptions. They are not real-world motor fault accuracy."
+}

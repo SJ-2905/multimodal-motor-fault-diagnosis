@@ -1,0 +1,8 @@
+Dashboard serial input format (one line per sample, 115200 baud):
+
+Vibration_RMS_g,Voltage_V,Current_A,Temperature_C
+0.0251,12.104,0.2450,29.50
+
+The first line is an optional header and will be ignored by the dashboard.
+Each data line must contain exactly four numeric values separated by commas.
+Do not print labels, units, JSON, or extra commas on the same data line.

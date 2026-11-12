@@ -1,0 +1,21 @@
+{
+  "project": "Multimodal Edge-AI Based Electric Motor Fault Diagnosis Using Vibration, Electrical and Thermal Signatures",
+  "sensors": [
+    "MPU6050",
+    "INA219",
+    "DS18B20"
+  ],
+  "acoustic_sensor": false,
+  "classifier": "RandomForestClassifier",
+  "training_data": "Synthetic; 8000 rows; 2000 per class",
+  "model_execution": "Laptop dashboard; not deployed on ESP32",
+  "serial": {
+    "baud": 115200,
+    "fields": [
+      "Vibration_RMS_g",
+      "Voltage_V",
+      "Current_A",
+      "Temperature_C"
+    ]
+  }
+}

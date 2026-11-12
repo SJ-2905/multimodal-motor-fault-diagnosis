@@ -1,0 +1,44 @@
+{
+  "dataset_rows": 8000,
+  "rows_per_class": {
+    "Mechanical anomaly": 2000,
+    "Electrical anomaly": 2000,
+    "Normal": 2000,
+    "Thermal anomaly": 2000
+  },
+  "train_rows": 6000,
+  "test_rows": 2000,
+  "synthetic_holdout_accuracy": 0.9215,
+  "confusion_matrix": [
+    [
+      456,
+      5,
+      25,
+      14
+    ],
+    [
+      14,
+      474,
+      8,
+      4
+    ],
+    [
+      41,
+      7,
+      447,
+      5
+    ],
+    [
+      25,
+      3,
+      6,
+      466
+    ]
+  ],
+  "classes_order": [
+    "Normal",
+    "Mechanical anomaly",
+    "Electrical anomaly",
+    "Thermal anomaly"
+  ]
+}

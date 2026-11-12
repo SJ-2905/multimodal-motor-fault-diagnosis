@@ -1,0 +1,10 @@
+                    precision    recall  f1-score   support
+
+            Normal       0.85      0.91      0.88       500
+Mechanical anomaly       0.97      0.95      0.96       500
+Electrical anomaly       0.92      0.89      0.91       500
+   Thermal anomaly       0.95      0.93      0.94       500
+
+          accuracy                           0.92      2000
+         macro avg       0.92      0.92      0.92      2000
+      weighted avg       0.92      0.92      0.92      2000

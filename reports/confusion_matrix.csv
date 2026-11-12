@@ -1,0 +1,5 @@
+,Normal,Mechanical anomaly,Electrical anomaly,Thermal anomaly
+Normal,456,5,25,14
+Mechanical anomaly,14,474,8,4
+Electrical anomaly,41,7,447,5
+Thermal anomaly,25,3,6,466
