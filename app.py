@@ -137,11 +137,11 @@ def render_dashboard() -> None:
     metric_columns[2].metric("Motor current", display(latest.get("current_a"), 3, "A"))
     metric_columns[3].metric("Probe temperature", display(latest.get("temperature_c"), 2, "°C"))
 
-    status_columns = st.columns(3)
+    status_columns = st.columns(2)
     for col, key, label in zip(
-        status_columns,
-        ("adxl345", "ina219", "ds18b20"),
-        ("ADXL345 vibration", "INA219 voltage/current", "DS18B20 temperature"),
+        status_columns[:2],
+        ("adxl345", "ina219"),
+        ("ADXL345 vibration", "INA219 voltage/current"),
     ):
         state = sensor_status.get(key)
         label_prefix = "Live" if readings_live else "Last known"

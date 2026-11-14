@@ -94,9 +94,9 @@ The dashboard presents four values transmitted by the firmware:
 - `current_a`: INA219 current, meaningful as motor current only when wired in series with the motor supply path and when the module/shunt remain within rating.
 - `temperature_c`: DS18B20 probe measurement.
 
-The dashboard plots the last 120 samples from a bounded 600-sample history. It compares medians of the previous and latest six readings for simple directional trend labels. Those labels are descriptive only, not fault limits or diagnoses. `null` values appear as unavailable rather than being invented or silently corrected.
+The dashboard plots the last 120 samples from a bounded 600-sample history. It compares medians of the previous and latest six readings for simple directional trend labels. Those labels are descriptive only, not fault limits or diagnoses. If the DS18B20 has produced one valid reading, the firmware holds that temperature through probe disconnects; the shown temperature can therefore be old until the probe resumes updating.
 
-The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means the sensor checks are currently passing and INA219 bus voltage is at least 1 V; yellow means the sensor checks are passing but bus voltage is below 1 V; red means a sensor failed to initialize or had repeated read failures. A single transient read miss is tolerated by the LED, while the telemetry reports that sample's status. Sensor initialization retries every 2 seconds. These are prototype states, not certified safety indications. The dashboard link is Wi‑Fi (`MotorMonitor`), not Bluetooth.
+The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means the ADXL345/INA219 checks are passing and INA219 bus voltage is at least 1 V; yellow means those checks pass but bus voltage is below 1 V; red means ADXL345 or INA219 failed to initialize or the ADXL345 had repeated read failures. DS18B20 temperature holds its last valid reading and does not control the LEDs. A single transient ADXL345 read miss is tolerated. Sensor initialization retries every 2 seconds. These are prototype states, not certified safety indications. The dashboard link is Wi‑Fi (`MotorMonitor`), not Bluetooth.
 
 ## Further documentation
 

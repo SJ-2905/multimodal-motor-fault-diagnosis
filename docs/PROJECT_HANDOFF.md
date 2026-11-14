@@ -58,7 +58,7 @@ INA219 VIN+/VIN− ── motor battery/load current path  │
 1. The ADXL345 supplies acceleration events over I²C.
 2. Firmware collects 200 events, applies the configured per-axis static bias/scale corrections, removes each axis's mean for the window, and computes the square root of the sum of the three axis variances. It labels this result `vibration_rms_g`. This is a simple short-window acceleration-variation feature; it is not a frequency-spectrum vibration measurement.
 3. INA219's library supplies bus voltage and shunt current. Firmware converts library current from mA to A and applies configurable offset/scale correction. Current is only motor current if the motor supply is physically routed through VIN+ to VIN− and the breakout remains within its rating.
-4. DallasTemperature/OneWire reads the DS18B20. A disconnect is published as JSON `null`; firmware periodically retries discovery after a failure.
+4. DallasTemperature/OneWire reads the DS18B20. After its first valid reading, firmware holds the last valid temperature through a probe disconnect and retries discovery/read; it does not make the status LEDs red. Before the first valid temperature, the JSON value is `null`.
 5. ESP32's `WebServer` returns the latest sample as JSON and provides `/health` for reachability. The default SoftAP IP is `192.168.4.1`.
 6. `WifiTelemetryClient` polls every 0.8 s, validates the four fields, stores a maximum of 600 distinct sample IDs, and separates Connected, Reconnecting, and Waiting based on response age. The dashboard redraws every second and graphs the most recent 120 points. The live dashboard transport is Wi-Fi/HTTP; the active sketch does not use Bluetooth.
 7. The dashboard trend card compares the median of the previous six valid measurements with the median of the latest six. A change above +10% is called rising, below −10% falling, otherwise steady. A floor in the percent denominator avoids division by near-zero values. This is a descriptive heuristic only, not a fault classifier or alarm threshold.
@@ -117,7 +117,7 @@ Before use, identify the battery cell chemistry, series arrangement, fully charg
 
 ### Startup
 
-At boot, firmware starts Serial at **115200 baud**, initializes GPIO25–27 and briefly tests the green/yellow/red LEDs, then starts the Wi-Fi access point and HTTP server. It initializes I²C on SDA 21 / SCL 22 at 100 kHz, scans for ADXL345 at `0x53` or `0x1D`, initializes INA219, and discovers the DS18B20. Startup details are printed to USB serial for debugging.
+At boot, firmware starts Serial at **115200 baud**, initializes GPIO25–27, then starts the Wi-Fi access point and HTTP server. It initializes I²C on SDA 21 / SCL 22 at 100 kHz, scans for ADXL345 at `0x53` or `0x1D`, initializes INA219, and discovers the DS18B20. Startup details are printed to USB serial for debugging. There is no LED self-test; red is reserved for ADXL345/INA219 faults.
 
 ### Routes and payload
 
@@ -149,15 +149,15 @@ Numbers in this example are illustrative, not a promised/validated live reading.
 
 ### LED states
 
-The code uses these test states:
+The code uses these status states:
 
 | LED | Firmware condition |
 |---|---|
-| Red | ADXL345 or INA219 did not initialize, or an ADXL345 / DS18B20 fault persists for three consecutive checks |
-| Yellow | All sensors returned a reading, but INA219 bus voltage is below 1.0 V |
-| Green | All sensors returned a reading and INA219 bus voltage is at least 1.0 V |
+| Red | ADXL345/INA219 failed to initialize or ADXL345 read failed repeatedly |
+| Yellow | ADXL345/INA219 checks pass, but INA219 bus voltage is below 1.0 V |
+| Green | ADXL345/INA219 checks pass and INA219 bus voltage is at least 1.0 V |
 
-The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. A single transient ADXL345 / DS18B20 read miss does not turn the red LED on, but that individual sample is still marked failed in telemetry. The LEDs do not identify motor faults, indicate battery safety, or replace a fuse/driver. The self-test flashes green, yellow, red briefly at startup; a repeated self-test blink pattern usually means the board is rebooting.
+The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. A single transient ADXL345 read miss does not turn the red LED on. The DS18B20 value holds the last valid sample through a disconnect; its status is hidden from dashboard sensor cards and it never controls the red LED. This means the displayed temperature may be old while the probe is loose. The LEDs do not identify motor faults, indicate battery safety, or replace a fuse/driver. Red is no longer flashed during startup; LEDs remain off during initialization and then show the motor-sensor state.
 
 ## 6. Clean installation and runbook
 

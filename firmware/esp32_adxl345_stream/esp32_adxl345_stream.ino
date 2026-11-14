@@ -61,30 +61,18 @@ uint32_t lastTemperatureRetryMs = 0;
 uint32_t lastSensorRetryMs = 0;
 uint32_t sampleSequence = 0;
 uint8_t adxlReadFailures = 0;
-uint8_t temperatureReadFailures = 0;
 float latestVibrationRmsG = NAN;
 float latestVoltageV = NAN;
 float latestCurrentA = NAN;
 float latestTemperatureC = NAN;
 bool latestAdxlReadingOK = false;
 bool latestInaOK = false;
-bool latestTemperatureReadingOK = false;
+bool temperatureHasValidReading = false;
 
 void setStatusLeds(bool green, bool yellow, bool red) {
   digitalWrite(LED_GREEN_PIN, green ? HIGH : LOW);
   digitalWrite(LED_YELLOW_PIN, yellow ? HIGH : LOW);
   digitalWrite(LED_RED_PIN, red ? HIGH : LOW);
-}
-
-void testStatusLeds() {
-  Serial.println("LED self-test: green, yellow, red");
-  setStatusLeds(true, false, false);
-  delay(500);
-  setStatusLeds(false, true, false);
-  delay(500);
-  setStatusLeds(false, false, true);
-  delay(500);
-  setStatusLeds(false, false, false);
 }
 
 String jsonNumber(float value, uint8_t digits) {
@@ -112,7 +100,9 @@ void handleTelemetry() {
   json += ",\"ina219\":";
   json += latestInaOK ? "true" : "false";
   json += ",\"ds18b20\":";
-  json += latestTemperatureReadingOK ? "true" : "false";
+  // This field means a temperature has been read at least once this boot.
+  // Transient probe disconnects are intentionally hidden from the live UI.
+  json += temperatureHasValidReading ? "true" : "false";
   json += "}}";
   server.sendHeader("Cache-Control", "no-store, max-age=0");
   server.send(200, "application/json", json);
@@ -171,6 +161,11 @@ uint8_t scanI2CBus() {
   return foundAdxlAddress;
 }
 
+bool i2cDeviceResponds(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
 bool readVibration(float &axG, float &ayG, float &azG, float &rmsG) {
   double sumX = 0.0, sumY = 0.0, sumZ = 0.0;
   double sumSquaresX = 0.0, sumSquaresY = 0.0, sumSquaresZ = 0.0;
@@ -223,7 +218,6 @@ void setup() {
 
   Serial.println();
   Serial.println("ESP32 motor sensor monitor starting");
-  testStatusLeds();
   startWifiTelemetry();
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -246,9 +240,7 @@ void setup() {
 
   temperatureSensor.begin();
   temperatureOK = temperatureSensor.getDeviceCount() > 0;
-  Serial.println(temperatureOK ? "DS18B20: OK" : "DS18B20: NOT FOUND");
   lastTemperatureRetryMs = millis();
-  if (!temperatureOK) temperatureReadFailures = PERSISTENT_FAILURE_LIMIT;
   lastSensorRetryMs = millis();
 
 }
@@ -268,6 +260,10 @@ void loop() {
         adxlOK = true;
         Serial.println("ADXL345: recovered");
       }
+    }
+    if (inaOK && !i2cDeviceResponds(0x40)) {
+      inaOK = false;
+      Serial.println("INA219: disconnected from I2C");
     }
     if (!inaOK && ina219.begin(&Wire)) {
       inaOK = true;
@@ -297,7 +293,6 @@ void loop() {
     lastTemperatureRetryMs = millis();
     temperatureSensor.begin();
     temperatureOK = temperatureSensor.getDeviceCount() > 0;
-    if (!temperatureOK && temperatureReadFailures < 255) temperatureReadFailures++;
   }
 
   bool temperatureReadingOK = false;
@@ -307,27 +302,25 @@ void loop() {
     if (measuredTemperature != DEVICE_DISCONNECTED_C) {
       temperatureC = measuredTemperature + DS18B20_OFFSET_C;
       temperatureReadingOK = true;
-      temperatureReadFailures = 0;
+      temperatureHasValidReading = true;
     } else {
       temperatureOK = false;
       lastTemperatureRetryMs = millis();
-      if (temperatureReadFailures < 255) temperatureReadFailures++;
     }
   }
 
   latestVibrationRmsG = vibrationRmsG;
   latestVoltageV = voltageV;
   latestCurrentA = currentA;
-  latestTemperatureC = temperatureC;
+  // Hold the last valid temperature through a brief loose-wire interruption.
+  if (temperatureReadingOK) latestTemperatureC = temperatureC;
   latestAdxlReadingOK = adxlReadingOK;
   latestInaOK = inaOK;
-  latestTemperatureReadingOK = temperatureReadingOK;
   sampleSequence++;
 
   // Test indication only: this is not yet a calibrated motor-fault classifier.
-  if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT ||
-      temperatureReadFailures >= PERSISTENT_FAILURE_LIMIT) {
-    setStatusLeds(false, false, true);  // red: sensor missing/read failed
+  if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT) {
+    setStatusLeds(false, false, true);  // red: motor-sensor path unavailable
   } else if (voltageV < MOTOR_BUS_PRESENT_THRESHOLD_V) {
     setStatusLeds(false, true, false);  // yellow: sensors work, motor supply not present at INA bus
   } else {
