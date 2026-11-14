@@ -102,6 +102,10 @@ def render_dashboard() -> None:
                 "4. Leave this dashboard open; it reconnects automatically."
             )
             st.caption("ESP32 address: 192.168.4.1")
+            st.caption(
+                "If MotorMonitor is missing from the Wi‑Fi list, check ESP32 power, press EN/RESET once, "
+                "and confirm the 115200-baud boot log says the access point is ready."
+            )
         st.caption(f"Latest sensor sample: {sample_age_text}")
         if data["error"]:
             with st.expander("Connection details"):
