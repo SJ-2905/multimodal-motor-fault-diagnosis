@@ -89,14 +89,14 @@ Use suitable wire and rated terminals for the motor current path; do not route m
 
 The dashboard presents four values transmitted by the firmware:
 
-- `vibration_rms_g`: short-window variation in the ADXL345's three acceleration axes, after subtracting each axis's mean for that window; this is a basic vibration trend indicator.
+- `vibration_rms_g`: short-window variation in the ADXL345's three acceleration axes, after subtracting each axis's mean for that window; the API stores this in g, while the dashboard displays the converted m/s² value.
 - `voltage_v`: INA219 bus voltage at VIN− relative to GND; this is not necessarily battery voltage at VIN+.
 - `current_a`: INA219 current, meaningful as motor current only when wired in series with the motor supply path and when the module/shunt remain within rating.
 - `temperature_c`: DS18B20 probe measurement.
 
 The dashboard plots the last 120 samples from a bounded 600-sample history. It compares medians of the previous and latest six readings for simple directional trend labels. Those labels are descriptive only, not fault limits or diagnoses. If the DS18B20 has produced one valid reading, the firmware holds that temperature through probe disconnects; the shown temperature can therefore be old until the probe resumes updating.
 
-The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means the ADXL345/INA219 checks are passing and INA219 bus voltage is at least 1 V; yellow means those checks pass but bus voltage is below 1 V; red means ADXL345 or INA219 failed to initialize or the ADXL345 had repeated read failures. DS18B20 temperature holds its last valid reading and does not control the LEDs. A single transient ADXL345 read miss is tolerated. Sensor initialization retries every 2 seconds. These are prototype states, not certified safety indications. The dashboard link is Wi‑Fi (`MotorMonitor`), not Bluetooth.
+The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). Prototype vibration thresholds are 30 m/s² for yellow and 35 m/s² for red. Red also indicates an ADXL345 or INA219 fault; yellow also indicates INA219 bus voltage below 1 V when there is no red condition. Green means the ADXL345/INA219 checks pass, vibration is below 30 m/s², and INA219 bus voltage is at least 1 V. DS18B20 temperature holds its last valid reading and does not control the LEDs. A single transient ADXL345 read miss is tolerated. Sensor initialization retries every 2 seconds. These thresholds are demonstration indicators, not calibrated or validated motor-fault limits. The dashboard link is Wi‑Fi (`MotorMonitor`), not Bluetooth.
 
 ## Further documentation
 

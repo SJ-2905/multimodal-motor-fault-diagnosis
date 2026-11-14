@@ -11,6 +11,9 @@ from wifi_monitor import WifiTelemetryClient
 
 
 ESP32_ENDPOINT = os.getenv("ESP32_TELEMETRY_URL", "http://192.168.4.1/api/telemetry")
+STANDARD_GRAVITY = 9.80665
+VIBRATION_WARNING_MS2 = 30.0
+VIBRATION_ALERT_MS2 = 35.0
 
 st.set_page_config(
     page_title="Motor Fault Diagnosis",
@@ -131,11 +134,22 @@ def render_dashboard() -> None:
             st.info("Waiting for Wi‑Fi telemetry. The dashboard will fill in automatically when the ESP32 is reachable.")
 
     st.subheader("Current readings" if readings_live else "Last readings (may be stale)")
+    vibration_g = latest.get("vibration_rms_g")
+    try:
+        vibration_ms2 = float(vibration_g) * STANDARD_GRAVITY
+    except (TypeError, ValueError):
+        vibration_ms2 = math.nan
     metric_columns = st.columns(4)
-    metric_columns[0].metric("Vibration RMS", display(latest.get("vibration_rms_g"), 4, "g"))
+    metric_columns[0].metric("Vibration RMS", display(vibration_ms2, 2, "m/s²"))
     metric_columns[1].metric("Motor voltage", display(latest.get("voltage_v"), 2, "V"))
     metric_columns[2].metric("Motor current", display(latest.get("current_a"), 3, "A"))
     metric_columns[3].metric("Probe temperature", display(latest.get("temperature_c"), 2, "°C"))
+
+    if readings_live and math.isfinite(vibration_ms2):
+        if vibration_ms2 >= VIBRATION_ALERT_MS2:
+            st.error(f"HIGH VIBRATION ALERT · {vibration_ms2:.2f} m/s² (red LED threshold: 35 m/s²)")
+        elif vibration_ms2 >= VIBRATION_WARNING_MS2:
+            st.warning(f"Elevated vibration · {vibration_ms2:.2f} m/s² (yellow LED threshold: 30 m/s²)")
 
     status_columns = st.columns(2)
     for col, key, label in zip(
@@ -155,9 +169,10 @@ def render_dashboard() -> None:
     st.subheader("Live trends")
     if history:
         frame = pd.DataFrame(history).set_index("time").tail(120)
+        frame["vibration_rms_ms2"] = frame["vibration_rms_g"] * STANDARD_GRAVITY
         left, right = st.columns(2)
         for col, title, field, unit in (
-            (left, "Vibration RMS", "vibration_rms_g", "g"),
+            (left, "Vibration RMS", "vibration_rms_ms2", "m/s²"),
             (right, "Motor current", "current_a", "A"),
             (left, "Motor voltage", "voltage_v", "V"),
             (right, "Probe temperature", "temperature_c", "°C"),

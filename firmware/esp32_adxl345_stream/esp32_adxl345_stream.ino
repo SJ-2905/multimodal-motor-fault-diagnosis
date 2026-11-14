@@ -23,6 +23,9 @@ constexpr uint32_t TEMPERATURE_RETRY_INTERVAL_MS = 2000;
 constexpr uint32_t SENSOR_RETRY_INTERVAL_MS = 2000;
 constexpr uint8_t PERSISTENT_FAILURE_LIMIT = 3;
 constexpr float MOTOR_BUS_PRESENT_THRESHOLD_V = 1.0f;
+// User-selected prototype vibration indicators, expressed in m/s^2.
+constexpr float VIBRATION_WARNING_MS2 = 30.0f;
+constexpr float VIBRATION_ALERT_MS2 = 35.0f;
 
 // The ESP32 creates a local Wi-Fi network for the dashboard. Change these if
 // you want a different network name/password. Password must be at least 8 chars.
@@ -319,10 +322,13 @@ void loop() {
   sampleSequence++;
 
   // Test indication only: this is not yet a calibrated motor-fault classifier.
-  if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT) {
-    setStatusLeds(false, false, true);  // red: motor-sensor path unavailable
-  } else if (voltageV < MOTOR_BUS_PRESENT_THRESHOLD_V) {
-    setStatusLeds(false, true, false);  // yellow: sensors work, motor supply not present at INA bus
+  const float vibrationRmsMs2 = vibrationRmsG * STANDARD_GRAVITY;
+  if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT ||
+      vibrationRmsMs2 >= VIBRATION_ALERT_MS2) {
+    setStatusLeds(false, false, true);  // red: high vibration or motor-sensor path fault
+  } else if (vibrationRmsMs2 >= VIBRATION_WARNING_MS2 ||
+             voltageV < MOTOR_BUS_PRESENT_THRESHOLD_V) {
+    setStatusLeds(false, true, false);  // yellow: elevated vibration or motor supply not present at INA bus
   } else {
     setStatusLeds(true, false, false);  // green: sensors work and voltage is present at INA bus
   }

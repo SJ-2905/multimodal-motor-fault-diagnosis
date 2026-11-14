@@ -153,11 +153,11 @@ The code uses these status states:
 
 | LED | Firmware condition |
 |---|---|
-| Red | ADXL345/INA219 failed to initialize or ADXL345 read failed repeatedly |
-| Yellow | ADXL345/INA219 checks pass, but INA219 bus voltage is below 1.0 V |
-| Green | ADXL345/INA219 checks pass and INA219 bus voltage is at least 1.0 V |
+| Red | Vibration RMS is at least 35 m/s², or ADXL345/INA219 fault |
+| Yellow | Vibration RMS is at least 30 but below 35 m/s², or INA219 bus voltage is below 1.0 V with no red condition |
+| Green | ADXL345/INA219 checks pass, vibration is below 30 m/s², and INA219 bus voltage is at least 1.0 V |
 
-The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. A single transient ADXL345 read miss does not turn the red LED on. The DS18B20 value holds the last valid sample through a disconnect; its status is hidden from dashboard sensor cards and it never controls the red LED. This means the displayed temperature may be old while the probe is loose. The LEDs do not identify motor faults, indicate battery safety, or replace a fuse/driver. Red is no longer flashed during startup; LEDs remain off during initialization and then show the motor-sensor state.
+The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. It converts the RMS value from g to m/s² for LED decisions and uses the demonstration thresholds 30 m/s² (yellow) and 35 m/s² (red). The dashboard displays vibration in m/s². These user-selected thresholds are not calibrated or validated motor-fault limits. A single transient ADXL345 read miss does not turn the red LED on. The DS18B20 value holds the last valid sample through a disconnect; its status is hidden from dashboard sensor cards and it never controls the red LED. This means the displayed temperature may be old while the probe is loose. The LEDs do not indicate battery safety or replace a fuse/driver. Red is no longer flashed during startup; LEDs remain off during initialization and then show the motor-sensor state.
 
 ## 6. Clean installation and runbook
 
