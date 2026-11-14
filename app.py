@@ -71,10 +71,18 @@ def valid_samples(history: list[dict], field: str) -> list[float]:
 
 def render_dashboard() -> None:
     data = monitor.snapshot()
-    connected = data["status"] == "Connected"
+    status = data["status"]
+    connected = status == "Connected"
+    reconnecting = status == "Reconnecting"
     latest = data["latest"] or {}
     history = data["history"]
     sensor_status = data["sensor_status"]
+    sample_age = data.get("sample_age_s")
+    sample_fresh = sample_age is not None and sample_age <= 5.0
+    readings_live = connected and sample_fresh
+    sample_age_text = (
+        f"{sample_age:.1f}s ago" if sample_age is not None else "not received yet"
+    )
 
     with st.sidebar:
         st.header("ESP32 connection")
@@ -82,28 +90,43 @@ def render_dashboard() -> None:
             st.success("Connected over Wi‑Fi")
             st.caption(f"{data['device']} · {data['firmware']}")
             st.caption(f"Live link: {data['endpoint']}")
+        elif reconnecting:
+            st.warning("Reconnecting · brief Wi‑Fi interruption")
+            st.caption(f"Last ESP32 response: {data['response_age_s']:.1f}s ago")
         else:
             st.warning("Waiting for the ESP32")
             st.markdown(
                 "1. Connect this computer to **MotorMonitor** Wi‑Fi.\n"
                 "2. Password: **motorlab24**\n"
-                "3. Leave this dashboard open; it reconnects automatically."
+                "3. Keep the computer on that network; it has no internet access.\n"
+                "4. Leave this dashboard open; it reconnects automatically."
             )
             st.caption("ESP32 address: 192.168.4.1")
-            if data["error"]:
-                st.caption(f"Connection detail: {data['error']}")
+        st.caption(f"Latest sensor sample: {sample_age_text}")
+        if data["error"]:
+            with st.expander("Connection details"):
+                st.code(data["error"], language=None)
         st.divider()
         st.caption("USB is only needed to upload firmware. Sensor readings reach this dashboard over Wi‑Fi.")
 
     st.title("⚙️ Edge-AI Electric Motor Fault Diagnosis")
     st.caption("Live measurements from the ESP32 sensor system")
 
-    if connected:
-        st.success("Live connection active · values below are received directly from the ESP32.")
+    if readings_live:
+        st.success("Live connection active · fresh sensor samples are arriving from the ESP32.")
+    elif connected and latest:
+        st.warning("ESP32 Wi‑Fi is reachable, but no new sensor sample has arrived for over 5 seconds.")
+    elif connected:
+        st.info("ESP32 is reachable · waiting for the first sensor sample.")
+    elif reconnecting:
+        st.warning("Reconnecting to the ESP32. The last values are kept on screen temporarily.")
     else:
-        st.info("Waiting for Wi‑Fi telemetry. The dashboard will fill in automatically when the ESP32 is reachable.")
+        if latest:
+            st.warning("ESP32 is not reachable. Values below are the last received sample, not live readings.")
+        else:
+            st.info("Waiting for Wi‑Fi telemetry. The dashboard will fill in automatically when the ESP32 is reachable.")
 
-    st.subheader("Current readings")
+    st.subheader("Current readings" if readings_live else "Last readings (may be stale)")
     metric_columns = st.columns(4)
     metric_columns[0].metric("Vibration RMS", display(latest.get("vibration_rms_g"), 4, "g"))
     metric_columns[1].metric("Motor voltage", display(latest.get("voltage_v"), 2, "V"))
@@ -117,12 +140,13 @@ def render_dashboard() -> None:
         ("ADXL345 vibration", "INA219 voltage/current", "DS18B20 temperature"),
     ):
         state = sensor_status.get(key)
+        label_prefix = "Live" if readings_live else "Last known"
         if state is True:
-            col.success(f"{label}: OK")
+            col.success(f"{label_prefix} · {label}: OK")
         elif state is False:
-            col.error(f"{label}: check")
+            col.error(f"{label_prefix} · {label}: check")
         else:
-            col.info(f"{label}: waiting")
+            col.info(f"{label_prefix} · {label}: waiting")
 
     st.subheader("Live trends")
     if history:
@@ -159,9 +183,15 @@ def render_dashboard() -> None:
     else:
         st.caption("Trend comparison appears after 12 valid samples. It describes recent movement; it is not a calibrated fault verdict.")
 
-    if connected and history:
+    if history:
         last_time = history[-1]["time"].astimezone().strftime("%H:%M:%S")
-        st.caption(f"Last sample: {last_time} · {data['valid_rows']} samples received")
+        st.caption(f"Last sample received at {last_time} · {sample_age_text} · {data['valid_rows']} samples received")
+    if data.get("restart_count", 0):
+        st.warning(
+            "The ESP32 uptime restarted during this dashboard session. If that lines up with starting the motor, "
+            "check the ESP32 supply and motor wiring for voltage dips or electrical noise; this dashboard detects "
+            "the reboot but cannot identify its cause by itself."
+        )
     st.caption("Readings are shown as sent by the sensors. Calibration and fault limits have not been applied here.")
 
 

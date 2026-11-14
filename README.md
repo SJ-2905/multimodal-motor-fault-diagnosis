@@ -46,7 +46,7 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Join **MotorMonitor** Wi-Fi on the same computer, then open the local URL printed by Streamlit (usually `http://localhost:8501`). The dashboard reconnects automatically when the endpoint becomes reachable. Disconnecting the computer from the access point interrupts live readings. To stop the app, press **Ctrl+C** in the terminal running Streamlit.
+Join **MotorMonitor** Wi-Fi on the same computer, then open the local URL printed by Streamlit (usually `http://localhost:8501`). The access point is local-only and has no internet; keep the computer connected to it while monitoring (macOS may prefer another saved network). The dashboard retries automatically, tolerates brief missed polls, shows **Reconnecting** before declaring the ESP32 unreachable, and labels retained values as stale. It also distinguishes an active Wi-Fi link from fresh sensor samples: samples older than 5 seconds are marked stale. The dashboard reports ESP32 uptime resets observed during the current session. A reset near motor startup can point to a supply dip or electrical noise, but the dashboard cannot diagnose the cause on its own. To stop the app, press **Ctrl+C** in the terminal running Streamlit.
 
 If a fresh clone does not contain the Wi-Fi dashboard files described here, fetch the latest project changes from the maintainer before continuing.
 

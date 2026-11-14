@@ -283,6 +283,8 @@ Work through this sequence; change one thing at a time and remove motor power be
 6. Check the dashboard endpoint in the sidebar and environment variable. Restart Streamlit after changing the variable.
 7. If dashboard is on a different laptop from the ESP32 AP, that laptop also needs a route to the ESP32 (usually connect it to the AP). The AP is local-only.
 
+The dashboard polls every 0.8 seconds. A single slow or missed request no longer changes the display immediately: it remains Connected for up to 4 seconds after the last HTTP response, then shows Reconnecting, and shows Waiting after 15 seconds without a response. Sensor data freshness is tracked separately: if no new `sample_id` arrives for 5 seconds, readings are labeled stale even if the ESP32 still answers HTTP. The latest sensor values remain visible but are explicitly labeled stale while offline. The dashboard watches `uptime_ms`; if it drops, it records an ESP32 restart and warns that a power dip or motor electrical noise is one possible cause. That warning is a diagnostic lead, not proof of the cause. If the AP vanishes, first check that macOS stays joined to `MotorMonitor` (it has no internet), and compare the dashboard's reboot warning with motor starts and ESP32 serial boot logs.
+
 ### ADXL345 missing
 
 1. Check ADXL345 VCC-to-GND at the module, not merely at the ESP32 or rail.

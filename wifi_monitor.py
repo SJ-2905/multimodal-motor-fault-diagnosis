@@ -15,6 +15,8 @@ import requests
 FIELDS = ("vibration_rms_g", "voltage_v", "current_a", "temperature_c")
 MAX_HISTORY = 600
 POLL_SECONDS = 0.8
+CONNECTED_GRACE_SECONDS = 4.0
+RECONNECTING_SECONDS = 15.0
 
 
 def _numeric(value: Any) -> float:
@@ -48,6 +50,10 @@ class WifiTelemetryClient:
         self._latest: dict[str, Any] | None = None
         self._last_sample_id: int | str | None = None
         self._valid_rows = 0
+        self._last_response_monotonic: float | None = None
+        self._last_sample_monotonic: float | None = None
+        self._uptime_ms: int | None = None
+        self._restart_count = 0
 
     def start(self) -> None:
         with self._lock:
@@ -95,17 +101,34 @@ class WifiTelemetryClient:
                 with self._lock:
                     self._status = "Connected"
                     self._error = ""
+                    self._last_response_monotonic = time.monotonic()
                     self._device = str(payload.get("device") or "ESP32")
                     self._firmware = str(payload.get("firmware") or "Wi-Fi telemetry")
+                    try:
+                        uptime_ms = int(payload.get("uptime_ms"))
+                    except (TypeError, ValueError):
+                        uptime_ms = None
+                    restarted = False
+                    if uptime_ms is not None:
+                        if self._uptime_ms is not None and uptime_ms < self._uptime_ms:
+                            self._restart_count += 1
+                            restarted = True
+                        self._uptime_ms = uptime_ms
                     self._sensor_status = {
                         key: bool(statuses[key]) if key in statuses else None
                         for key in ("adxl345", "ina219", "ds18b20")
                     }
-                    if sample_id != self._last_sample_id:
+                    # The sample counter may start over after an ESP32 reboot.
+                    # Clear the remembered ID so the first post-reboot sample is kept.
+                    if restarted:
+                        self._last_sample_id = None
+                    if sample_id is None or sample_id != self._last_sample_id:
+                        sample["uptime_ms"] = uptime_ms
                         self._latest = sample
                         self._history.append(sample)
                         self._last_sample_id = sample_id
                         self._valid_rows += 1
+                        self._last_sample_monotonic = time.monotonic()
             except (requests.RequestException, ValueError) as exc:
                 with self._lock:
                     self._status = "Waiting"
@@ -117,12 +140,33 @@ class WifiTelemetryClient:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            now = time.monotonic()
+            response_age = (
+                now - self._last_response_monotonic
+                if self._last_response_monotonic is not None
+                else None
+            )
+            sample_age = (
+                now - self._last_sample_monotonic
+                if self._last_sample_monotonic is not None
+                else None
+            )
+            if response_age is None or response_age > RECONNECTING_SECONDS:
+                status = "Waiting"
+            elif response_age > CONNECTED_GRACE_SECONDS:
+                status = "Reconnecting"
+            else:
+                status = "Connected"
             return {
-                "status": self._status,
+                "status": status,
                 "endpoint": self.endpoint,
                 "error": self._error,
                 "device": self._device,
                 "firmware": self._firmware,
+                "response_age_s": response_age,
+                "sample_age_s": sample_age,
+                "uptime_ms": self._uptime_ms,
+                "restart_count": self._restart_count,
                 "sensor_status": dict(self._sensor_status),
                 "history": list(self._history),
                 "latest": dict(self._latest) if self._latest else None,
