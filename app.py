@@ -72,6 +72,66 @@ def valid_samples(history: list[dict], field: str) -> list[float]:
     return values
 
 
+def assess_motor_condition(
+    sensor_status: dict[str, bool | None], vibration_ms2: float, voltage_v: float
+) -> tuple[str, str, str]:
+    """Return a cautious prototype status, severity, and reason from one sample."""
+    failed = [
+        name
+        for key, name in (("adxl345", "ADXL345"), ("ina219", "INA219"))
+        if sensor_status.get(key) is False
+    ]
+    if failed:
+        return (
+            "Condition unavailable — sensor fault",
+            "error",
+            f"{', '.join(failed)} reported a fault, so the motor condition cannot be assessed reliably.",
+        )
+    if sensor_status.get("adxl345") is not True or sensor_status.get("ina219") is not True:
+        return (
+            "Condition unknown — sensor status unavailable",
+            "info",
+            "Waiting for valid ADXL345 and INA219 readings.",
+        )
+    if not math.isfinite(vibration_ms2):
+        return (
+            "Condition unknown — vibration reading unavailable",
+            "info",
+            "No valid vibration reading is available.",
+        )
+    if vibration_ms2 >= VIBRATION_ALERT_MS2:
+        return (
+            "Alert — high vibration; inspect motor",
+            "error",
+            (
+                f"Vibration is {vibration_ms2:.2f} m/s², at or above the "
+                "35 m/s² demonstration alert threshold. Stop and inspect the setup if unexpected."
+            ),
+        )
+    if vibration_ms2 >= VIBRATION_WARNING_MS2:
+        return (
+            "Maintenance check recommended — elevated vibration",
+            "warning",
+            (
+                f"Vibration is {vibration_ms2:.2f} m/s², at or above the "
+                "30 m/s² demonstration warning threshold. Compare with the motor's known-good baseline."
+            ),
+        )
+    if not math.isfinite(voltage_v):
+        return ("Condition unknown — voltage unavailable", "info", "INA219 voltage is not available in this sample.")
+    if voltage_v < 1.0:
+        return (
+            "Motor off or supply not detected",
+            "info",
+            "INA219 bus voltage is below 1.0 V, so a running-motor condition cannot be assessed.",
+        )
+    return (
+        "No vibration alert — within demonstration thresholds",
+        "success",
+        "No configured vibration alert was crossed in this sample. This is not a validated diagnosis.",
+    )
+
+
 def render_dashboard() -> None:
     data = monitor.snapshot()
     status = data["status"]
@@ -139,17 +199,33 @@ def render_dashboard() -> None:
         vibration_ms2 = float(vibration_g) * STANDARD_GRAVITY
     except (TypeError, ValueError):
         vibration_ms2 = math.nan
+    try:
+        voltage_v = float(latest.get("voltage_v"))
+    except (TypeError, ValueError):
+        voltage_v = math.nan
+
+    condition_title, condition_level, condition_detail = assess_motor_condition(
+        sensor_status, vibration_ms2, voltage_v
+    )
+    st.subheader("Motor condition")
+    if readings_live:
+        getattr(st, condition_level)(condition_title)
+        st.caption(condition_detail)
+    elif latest:
+        st.warning(f"Last known: {condition_title} · sample {sample_age_text}; this is not a live assessment.")
+        st.caption(condition_detail)
+    else:
+        st.info("Condition unknown · waiting for a valid live sensor sample.")
+    st.caption(
+        "Rule-based prototype status: vibration warning at 30 m/s², alert at 35 m/s². "
+        "Motor current is displayed but has no calibrated fault threshold."
+    )
+
     metric_columns = st.columns(4)
     metric_columns[0].metric("Vibration RMS", display(vibration_ms2, 2, "m/s²"))
     metric_columns[1].metric("Motor voltage", display(latest.get("voltage_v"), 2, "V"))
     metric_columns[2].metric("Motor current", display(latest.get("current_a"), 3, "A"))
     metric_columns[3].metric("Probe temperature", display(latest.get("temperature_c"), 2, "°C"))
-
-    if readings_live and math.isfinite(vibration_ms2):
-        if vibration_ms2 >= VIBRATION_ALERT_MS2:
-            st.error(f"HIGH VIBRATION ALERT · {vibration_ms2:.2f} m/s² (red LED threshold: 35 m/s²)")
-        elif vibration_ms2 >= VIBRATION_WARNING_MS2:
-            st.warning(f"Elevated vibration · {vibration_ms2:.2f} m/s² (yellow LED threshold: 30 m/s²)")
 
     status_columns = st.columns(2)
     for col, key, label in zip(

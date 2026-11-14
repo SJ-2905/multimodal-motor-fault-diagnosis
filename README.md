@@ -100,6 +100,7 @@ The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26
 
 ## Further documentation
 
+- [Project context and report guide](context.md)
 - [Project handoff, architecture, build history, troubleshooting, and setup for users/agents](docs/PROJECT_HANDOFF.md)
 - [Sensor calibration and accuracy-check procedure](CALIBRATION.md)
 - [ESP32 streaming firmware](firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino)
