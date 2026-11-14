@@ -20,6 +20,8 @@ constexpr uint16_t VIBRATION_SAMPLES = 200;
 constexpr uint16_t SAMPLE_INTERVAL_MS = 5;
 constexpr float STANDARD_GRAVITY = 9.80665f;
 constexpr uint32_t TEMPERATURE_RETRY_INTERVAL_MS = 2000;
+constexpr uint32_t SENSOR_RETRY_INTERVAL_MS = 2000;
+constexpr uint8_t PERSISTENT_FAILURE_LIMIT = 3;
 constexpr float MOTOR_BUS_PRESENT_THRESHOLD_V = 1.0f;
 
 // The ESP32 creates a local Wi-Fi network for the dashboard. Change these if
@@ -56,7 +58,10 @@ bool inaOK = false;
 bool temperatureOK = false;
 uint8_t adxlAddress = 0;
 uint32_t lastTemperatureRetryMs = 0;
+uint32_t lastSensorRetryMs = 0;
 uint32_t sampleSequence = 0;
+uint8_t adxlReadFailures = 0;
+uint8_t temperatureReadFailures = 0;
 float latestVibrationRmsG = NAN;
 float latestVoltageV = NAN;
 float latestCurrentA = NAN;
@@ -243,17 +248,43 @@ void setup() {
   temperatureOK = temperatureSensor.getDeviceCount() > 0;
   Serial.println(temperatureOK ? "DS18B20: OK" : "DS18B20: NOT FOUND");
   lastTemperatureRetryMs = millis();
+  if (!temperatureOK) temperatureReadFailures = PERSISTENT_FAILURE_LIMIT;
+  lastSensorRetryMs = millis();
 
 }
 
 void loop() {
   server.handleClient();
 
+  // Retry failed sensor initialization periodically so one startup race or
+  // brief I2C interruption does not leave the status LED red forever.
+  if (millis() - lastSensorRetryMs >= SENSOR_RETRY_INTERVAL_MS) {
+    lastSensorRetryMs = millis();
+    if (!adxlOK) {
+      if (adxlAddress == 0) adxlAddress = scanI2CBus();
+      if (adxlAddress != 0 && adxl.begin(adxlAddress)) {
+        adxl.setRange(ADXL345_RANGE_8_G);
+        adxl.setDataRate(ADXL345_DATARATE_200_HZ);
+        adxlOK = true;
+        Serial.println("ADXL345: recovered");
+      }
+    }
+    if (!inaOK && ina219.begin(&Wire)) {
+      inaOK = true;
+      Serial.println("INA219: recovered");
+    }
+  }
+
   float axG = NAN, ayG = NAN, azG = NAN, vibrationRmsG = NAN;
   float voltageV = NAN, currentA = NAN, temperatureC = NAN;
 
   bool adxlReadingOK = adxlOK && readVibration(axG, ayG, azG, vibrationRmsG);
-  if (adxlOK && !adxlReadingOK) adxlOK = false;
+  if (adxlReadingOK) {
+    adxlReadFailures = 0;
+  } else if (adxlReadFailures < 255) {
+    adxlReadFailures++;
+    if (adxlReadFailures >= PERSISTENT_FAILURE_LIMIT) adxlOK = false;
+  }
 
   if (inaOK) {
     const float measuredVoltageV = ina219.getBusVoltage_V();
@@ -266,6 +297,7 @@ void loop() {
     lastTemperatureRetryMs = millis();
     temperatureSensor.begin();
     temperatureOK = temperatureSensor.getDeviceCount() > 0;
+    if (!temperatureOK && temperatureReadFailures < 255) temperatureReadFailures++;
   }
 
   bool temperatureReadingOK = false;
@@ -275,9 +307,11 @@ void loop() {
     if (measuredTemperature != DEVICE_DISCONNECTED_C) {
       temperatureC = measuredTemperature + DS18B20_OFFSET_C;
       temperatureReadingOK = true;
+      temperatureReadFailures = 0;
     } else {
       temperatureOK = false;
       lastTemperatureRetryMs = millis();
+      if (temperatureReadFailures < 255) temperatureReadFailures++;
     }
   }
 
@@ -291,7 +325,8 @@ void loop() {
   sampleSequence++;
 
   // Test indication only: this is not yet a calibrated motor-fault classifier.
-  if (!adxlReadingOK || !inaOK || !temperatureReadingOK) {
+  if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT ||
+      temperatureReadFailures >= PERSISTENT_FAILURE_LIMIT) {
     setStatusLeds(false, false, true);  // red: sensor missing/read failed
   } else if (voltageV < MOTOR_BUS_PRESENT_THRESHOLD_V) {
     setStatusLeds(false, true, false);  // yellow: sensors work, motor supply not present at INA bus

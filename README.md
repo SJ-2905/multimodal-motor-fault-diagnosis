@@ -96,7 +96,7 @@ The dashboard presents four values transmitted by the firmware:
 
 The dashboard plots the last 120 samples from a bounded 600-sample history. It compares medians of the previous and latest six readings for simple directional trend labels. Those labels are descriptive only, not fault limits or diagnoses. `null` values appear as unavailable rather than being invented or silently corrected.
 
-The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means all three sensors returned a reading and INA219 bus voltage is at least 1 V; yellow means sensors returned readings but the bus voltage is below 1 V; red means at least one sensor did not initialize or a reading failed. These are prototype states, not certified safety indications.
+The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means the sensor checks are currently passing and INA219 bus voltage is at least 1 V; yellow means the sensor checks are passing but bus voltage is below 1 V; red means a sensor failed to initialize or had repeated read failures. A single transient read miss is tolerated by the LED, while the telemetry reports that sample's status. Sensor initialization retries every 2 seconds. These are prototype states, not certified safety indications. The dashboard link is Wi‑Fi (`MotorMonitor`), not Bluetooth.
 
 ## Further documentation
 

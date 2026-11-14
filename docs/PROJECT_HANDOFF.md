@@ -60,7 +60,7 @@ INA219 VIN+/VIN− ── motor battery/load current path  │
 3. INA219's library supplies bus voltage and shunt current. Firmware converts library current from mA to A and applies configurable offset/scale correction. Current is only motor current if the motor supply is physically routed through VIN+ to VIN− and the breakout remains within its rating.
 4. DallasTemperature/OneWire reads the DS18B20. A disconnect is published as JSON `null`; firmware periodically retries discovery after a failure.
 5. ESP32's `WebServer` returns the latest sample as JSON and provides `/health` for reachability. The default SoftAP IP is `192.168.4.1`.
-6. `WifiTelemetryClient` polls every 0.8 s, validates the four fields, stores a maximum of 600 distinct sample IDs, and marks the link waiting when a request fails. The dashboard redraws every second and graphs the most recent 120 points.
+6. `WifiTelemetryClient` polls every 0.8 s, validates the four fields, stores a maximum of 600 distinct sample IDs, and separates Connected, Reconnecting, and Waiting based on response age. The dashboard redraws every second and graphs the most recent 120 points. The live dashboard transport is Wi-Fi/HTTP; the active sketch does not use Bluetooth.
 7. The dashboard trend card compares the median of the previous six valid measurements with the median of the latest six. A change above +10% is called rising, below −10% falling, otherwise steady. A floor in the percent denominator avoids division by near-zero values. This is a descriptive heuristic only, not a fault classifier or alarm threshold.
 
 ## 4. Hardware wiring
@@ -153,11 +153,11 @@ The code uses these test states:
 
 | LED | Firmware condition |
 |---|---|
-| Red | ADXL read failed, INA219 not initialized, or DS18B20 read failed |
+| Red | ADXL345 or INA219 did not initialize, or an ADXL345 / DS18B20 fault persists for three consecutive checks |
 | Yellow | All sensors returned a reading, but INA219 bus voltage is below 1.0 V |
 | Green | All sensors returned a reading and INA219 bus voltage is at least 1.0 V |
 
-The LEDs do not identify motor faults, indicate battery safety, or replace a fuse/driver. The self-test flashes green, yellow, red briefly at startup.
+The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. A single transient ADXL345 / DS18B20 read miss does not turn the red LED on, but that individual sample is still marked failed in telemetry. The LEDs do not identify motor faults, indicate battery safety, or replace a fuse/driver. The self-test flashes green, yellow, red briefly at startup; a repeated self-test blink pattern usually means the board is rebooting.
 
 ## 6. Clean installation and runbook
 
