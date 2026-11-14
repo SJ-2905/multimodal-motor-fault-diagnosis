@@ -1,76 +1,108 @@
-# ESP32 motor sensor live monitor
+# Multimodal electric motor monitoring prototype
 
-The ESP32 reads an ADXL345 accelerometer, INA219 voltage/current sensor, and DS18B20 temperature probe. It creates a private Wi-Fi access point and serves the latest sensor sample over HTTP. The Streamlit dashboard connects directly to that ESP32 network; it does not read Arduino Serial Monitor output.
+This repository contains the ESP32 firmware and local dashboard for a small motor condition monitoring project. The active configuration uses an **ADXL345 accelerometer**, an **INA219 voltage/current monitor**, and a **DS18B20 temperature probe**. The ESP32 creates a local Wi-Fi access point and serves readings over HTTP. A Streamlit app on a nearby computer displays the live values and recent trends.
 
-The dashboard shows the four firmware measurements without smoothing, clipping, or hidden calibration. This does not by itself establish measurement accuracy; see [CALIBRATION.md](CALIBRATION.md).
+> This is a prototype for learning and demonstration. It is not an industrial vibration analyzer, calibrated measurement instrument, motor protection system, or validated fault diagnosis system. The separate Random Forest files in this repository use synthetic data; their score must not be presented as real-world fault-detection accuracy.
 
-> **Prototype limitation:** the repository's Random Forest model and sample dataset are synthetic demonstrations. The live dashboard does not show its predictions as real motor-fault results.
+## Fast setup
 
-## Hardware wiring
+### 1. Flash the ESP32
 
-| Device | Pin | ESP32 DevKit V1 |
-|---|---|---|
-| ADXL345 | VCC | 3V3 |
-| ADXL345 | GND | GND |
-| ADXL345 | SDA | GPIO21 / D21 |
-| ADXL345 | SCL | GPIO22 / D22 |
-| INA219 | VCC | 3V3 |
-| INA219 | GND | GND |
-| INA219 | SDA | GPIO21 / D21 (shared I²C bus) |
-| INA219 | SCL | GPIO22 / D22 (shared I²C bus) |
-| DS18B20 | VDD (red) | 3V3 |
-| DS18B20 | GND (black) | GND |
-| DS18B20 | DATA (yellow) | GPIO4 / D4 |
-| 4.7 kΩ pull-up | one leg | DS18B20 DATA / GPIO4 node |
-| 4.7 kΩ pull-up | other leg | 3V3 |
+Open [`firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino`](firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino) in Arduino IDE. Install **Adafruit ADXL345**, **Adafruit Unified Sensor**, **Adafruit INA219**, **OneWire**, and **DallasTemperature** from Library Manager. Select **ESP32 Dev Module** and the correct USB serial port, then use the **Upload** arrow. The serial port is needed to flash firmware and inspect diagnostics; live dashboard data uses Wi-Fi.
 
-Keep the motor battery/current path separate from ESP32 3V3. The INA219 measures motor current only when the motor supply current passes through its VIN+ and VIN− terminals, within the exact breakout's voltage, current, and shunt limits. Do not power the motor through the ESP32 or breadboard rails.
+The firmware's default access point is:
 
-## ESP32 Wi-Fi firmware
+| Setting | Value |
+|---|---|
+| Wi-Fi name | `MotorMonitor` |
+| Password | `motorlab24` |
+| ESP32 address | `192.168.4.1` |
+| Health URL | `http://192.168.4.1/health` |
+| Telemetry URL | `http://192.168.4.1/api/telemetry` |
 
-Open `firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino` in Arduino IDE. Install these libraries in Library Manager:
+### 2. Install and start the dashboard
 
-- Adafruit ADXL345
-- Adafruit Unified Sensor
-- Adafruit INA219
-- OneWire
-- DallasTemperature
+Install dependencies while the computer has internet access, then connect it to the ESP32 access point. The access point is local-only and does not provide internet.
 
-Select **ESP32 Dev Module** and the ESP32's USB serial port, then upload the sketch once over USB. USB is used to flash the firmware; live sensor data flows over Wi-Fi afterward.
-
-The ESP32 starts an access point with:
-
-- **Wi-Fi name:** `MotorMonitor`
-- **Password:** `motorlab24`
-- **Telemetry endpoint:** `http://192.168.4.1/api/telemetry`
-
-In macOS Wi-Fi settings, join `MotorMonitor`. The dashboard polls the fixed local endpoint and reconnects automatically. Keep the dashboard running on the same Mac. The Mac may report that this Wi-Fi has no internet; that is expected for this direct local link. The endpoint returns JSON with a sample ID, the four measurements, and sensor availability. Serial Monitor is not the data transport.
-
-The access-point name and password can be changed near the top of the firmware. If changed, update `ESP32_TELEMETRY_URL` in the dashboard environment only if the ESP32's local address is also changed; with the default SoftAP the address remains `192.168.4.1`.
-
-## Dashboard setup
-
-On macOS/Linux:
+**macOS / Linux**
 
 ```bash
+git clone https://github.com/SJ-2905/multimodal-motor-fault-diagnosis.git
+cd multimodal-motor-fault-diagnosis
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The dashboard automatically polls the ESP32 over HTTP on Wi-Fi. It reconnects after temporary Wi-Fi loss and shows an explicit instruction to join the ESP32 network when the endpoint is unavailable. It displays vibration RMS (g), INA219 bus voltage (V), INA219 current (A), and probe temperature (°C), with separate recent trend plots. The line plots retain the latest 120 samples from a bounded 600-sample history.
+**Windows PowerShell**
 
-## Measurement meaning
+```powershell
+git clone https://github.com/SJ-2905/multimodal-motor-fault-diagnosis.git
+cd multimodal-motor-fault-diagnosis
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+streamlit run app.py
+```
 
-- `vibration_rms_g` is a short-window acceleration-variation estimate from the ADXL345. It is a basic trend indicator, not calibrated bearing diagnostics or industrial vibration analysis.
-- `voltage_v` is INA219 bus voltage measured at VIN− relative to ground.
-- `current_a` is meaningful as motor current only when motor supply current actually passes through INA219 VIN+ to VIN−.
-- `temperature_c` is the DS18B20 probe reading.
-- Missing sensor values are returned as JSON `null` and shown as unavailable without hiding the other valid channels.
+Join **MotorMonitor** Wi-Fi on the same computer, then open the local URL printed by Streamlit (usually `http://localhost:8501`). The dashboard reconnects automatically when the endpoint becomes reachable. Disconnecting the computer from the access point interrupts live readings. To stop the app, press **Ctrl+C** in the terminal running Streamlit.
 
-## Motor safety
+If a fresh clone does not contain the Wi-Fi dashboard files described here, fetch the latest project changes from the maintainer before continuing.
 
-Disconnect motor power while rewiring. Do not bypass a blown fuse or run without suitable overcurrent protection. Confirm the battery pack's fully charged voltage, motor stall current, fuse rating, motor driver rating, wiring, and INA219 breakout/shunt rating before powering the motor. Do not deliberately stall or overload the motor without a properly rated, controlled test fixture.
+## Current sensor wiring
 
-This prototype is not a motor protection or safety device.
+All sensor logic wiring is for an **ESP32 DevKit V1**. The ADXL345 and INA219 share the same I²C bus. ESP32 `3V3` and `GND` power the sensor logic; never use these pins or breadboard power rails to run the 12 V motor.
+
+| Device | Module pin | ESP32 / connection |
+|---|---|---|
+| ADXL345 | VCC | 3V3 |
+| ADXL345 | GND | GND |
+| ADXL345 | SDA | GPIO21 / D21 |
+| ADXL345 | SCL | GPIO22 / D22 |
+| INA219 logic | VCC | 3V3 |
+| INA219 logic | GND | GND |
+| INA219 logic | SDA | GPIO21 / D21 (shared I²C) |
+| INA219 logic | SCL | GPIO22 / D22 (shared I²C) |
+| DS18B20 probe | VDD / red, if verified for this cable | 3V3 |
+| DS18B20 probe | GND / black, if verified for this cable | GND |
+| DS18B20 probe | DATA / yellow, if verified for this cable | GPIO4 / D4 |
+| Pull-up resistor | 4.7 kΩ, one side | DS18B20 DATA / GPIO4 node |
+| Pull-up resistor | other side | 3V3 |
+
+Probe wire colors are common for the probe used in this build, not a universal standard. Check the exact probe's labeling or datasheet before applying power. For solderless breadboards, five holes on one numbered row within A–E are connected together; likewise F–J; the center trench isolates the two halves. Power rails may be split partway along the board. Verify continuity and voltage with a meter instead of assuming a rail is continuous.
+
+### Motor current path
+
+The INA219 only reports motor current when the motor supply current passes through its screw-terminal path **VIN+ → VIN−**. The logic header still connects to ESP32 3V3, GND, SDA, and SCL.
+
+```text
+Battery positive → correctly rated fuse → switch → INA219 VIN+
+INA219 VIN− → motor positive
+Motor negative → battery negative
+Battery negative/common reference → INA219 GND and ESP32 GND
+```
+
+Use suitable wire and rated terminals for the motor current path; do not route motor current through a breadboard, the ESP32, or its 3V3/GND rails. The right fuse depends on motor startup/stall current, wire, battery, and sensor/shunt ratings. A 500 mA fuse reportedly blew in this build; do not bypass it or test the motor unfused. Do not deliberately stall or mechanically overload the motor without a controlled, rated fixture. See [the handoff guide](docs/PROJECT_HANDOFF.md#motor-power-and-current-safety).
+
+## What the software reports
+
+The dashboard presents four values transmitted by the firmware:
+
+- `vibration_rms_g`: short-window variation in the ADXL345's three acceleration axes, after subtracting each axis's mean for that window; this is a basic vibration trend indicator.
+- `voltage_v`: INA219 bus voltage at VIN− relative to GND; this is not necessarily battery voltage at VIN+.
+- `current_a`: INA219 current, meaningful as motor current only when wired in series with the motor supply path and when the module/shunt remain within rating.
+- `temperature_c`: DS18B20 probe measurement.
+
+The dashboard plots the last 120 samples from a bounded 600-sample history. It compares medians of the previous and latest six readings for simple directional trend labels. Those labels are descriptive only, not fault limits or diagnoses. `null` values appear as unavailable rather than being invented or silently corrected.
+
+The ESP32 also has three status LED outputs configured on GPIO25 (green), GPIO26 (yellow), and GPIO27 (red). In this firmware, green means all three sensors returned a reading and INA219 bus voltage is at least 1 V; yellow means sensors returned readings but the bus voltage is below 1 V; red means at least one sensor did not initialize or a reading failed. These are prototype states, not certified safety indications.
+
+## Further documentation
+
+- [Project handoff, architecture, build history, troubleshooting, and setup for users/agents](docs/PROJECT_HANDOFF.md)
+- [Sensor calibration and accuracy-check procedure](CALIBRATION.md)
+- [ESP32 streaming firmware](firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino)
+- [ADXL345 static calibration sketch](firmware/adxl345_static_calibration/adxl345_static_calibration.ino)
+- [Streamlit dashboard](app.py)
+- [Wi-Fi telemetry client](wifi_monitor.py)
