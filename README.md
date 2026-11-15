@@ -1,6 +1,6 @@
 # Multimodal electric motor monitoring prototype
 
-This repository contains the ESP32 firmware and local dashboard for a small motor condition monitoring project. The active configuration uses an **ADXL345 accelerometer**, an **INA219 voltage/current monitor**, and a **DS18B20 temperature probe**. The ESP32 creates a local Wi-Fi access point and serves readings over HTTP. A Streamlit app on a nearby computer displays the live values and recent trends.
+This repository contains the ESP32 firmware and local dashboard for a small motor condition monitoring project. The active configuration uses an **ADXL345 accelerometer**, an **INA219 voltage/current monitor**, and a **DS18B20 temperature probe**. The ESP32 creates a local Wi-Fi access point and serves readings over HTTP. A Streamlit app on a nearby computer presents a condition-first overview with recommended actions and recent motor trends.
 
 > This is a prototype for learning and demonstration. It is not an industrial vibration analyzer, calibrated measurement instrument, motor protection system, or validated fault diagnosis system. The separate Random Forest files in this repository use synthetic data; their score must not be presented as real-world fault-detection accuracy.
 
@@ -49,6 +49,12 @@ streamlit run app.py
 Join **MotorMonitor** Wi-Fi on the same computer, then open the local URL printed by Streamlit (usually `http://localhost:8501`). The access point is local-only and has no internet; keep the computer connected to it while monitoring (macOS may prefer another saved network). The dashboard retries automatically, tolerates brief missed polls, shows **Reconnecting** before declaring the ESP32 unreachable, and labels retained values as stale. It also distinguishes an active Wi-Fi link from fresh sensor samples: samples older than 5 seconds are marked stale. The dashboard reports ESP32 uptime resets observed during the current session. A reset near motor startup can point to a supply dip or electrical noise, but the dashboard cannot diagnose the cause on its own. To stop the app, press **Ctrl+C** in the terminal running Streamlit.
 
 If a fresh clone does not contain the Wi-Fi dashboard files described here, fetch the latest project changes from the maintainer before continuing.
+
+### Dashboard overview
+
+The main view prioritizes a single motor-health status card: **Healthy within configured limits**, **Maintenance check recommended**, **Possible overload**, **Sensor check required**, **Motor stopped**, or an initialization/unavailable state. It explains the indicators behind the status and gives a suggested next action. Three compact readings show vibration RMS, motor current, and motor temperature; the two charts focus on vibration and current. Connection and technical diagnostics are tucked into the collapsed sidebar. If data goes stale or Wi-Fi disconnects, the last condition and measurements are labelled as last-known rather than presented as live.
+
+The condition labels use the demonstration thresholds described below. “Healthy within configured limits” means only that the configured prototype rules are currently clear; it is not a certified or calibrated industrial diagnosis.
 
 ## Current sensor wiring
 

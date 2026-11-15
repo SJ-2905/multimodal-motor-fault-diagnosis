@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import math
 import os
 from statistics import median
@@ -18,10 +19,90 @@ CURRENT_WARNING_MULTIPLIER = 1.5
 CURRENT_ALERT_MULTIPLIER = 2.0
 
 st.set_page_config(
-    page_title="Motor Fault Diagnosis",
+    page_title="Motor Condition Monitor",
     page_icon="⚙️",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
+)
+
+st.markdown(
+    """
+    <style>
+      :root {
+        --ink: #17241f;
+        --muted: #64736c;
+        --line: #dce6e0;
+        --surface: #ffffff;
+        --canvas: #f4f7f5;
+        --green: #18794e;
+        --green-bg: #e8f5ed;
+        --amber: #9a5b00;
+        --amber-bg: #fff4dc;
+        --red: #b42318;
+        --red-bg: #fff0ed;
+        --blue: #2557a7;
+        --blue-bg: #edf4ff;
+      }
+      .stApp { background: var(--canvas); color: var(--ink); }
+      [data-testid="stHeader"] { background: transparent; }
+      [data-testid="stMainBlockContainer"] { padding-top: 1.8rem; max-width: 1450px; }
+      h1, h2, h3, p { color: var(--ink); }
+      .page-kicker {
+        color: var(--green); font-size: .74rem; font-weight: 750;
+        letter-spacing: .13em; text-transform: uppercase; margin-bottom: .25rem;
+      }
+      .page-subtitle { color: var(--muted); font-size: .98rem; margin-top: -.55rem; }
+      .link-pill {
+        display: inline-flex; align-items: center; gap: .55rem; float: right;
+        margin-top: .9rem; border: 1px solid var(--line); border-radius: 999px;
+        padding: .45rem .8rem; background: var(--surface); color: var(--muted);
+        font-size: .8rem; font-weight: 650;
+      }
+      .dot { width: .55rem; height: .55rem; border-radius: 50%; display: inline-block; }
+      .dot-green { background: #20a464; box-shadow: 0 0 0 3px #e5f5ec; }
+      .dot-amber { background: #dc9500; box-shadow: 0 0 0 3px #fff4dc; }
+      .dot-red { background: #d64545; box-shadow: 0 0 0 3px #fff0ed; }
+      .dot-gray { background: #84928b; box-shadow: 0 0 0 3px #eef1ef; }
+      .condition-card {
+        border: 1px solid var(--line); border-left: 7px solid var(--green);
+        background: var(--surface); border-radius: 16px; padding: 1.35rem 1.55rem;
+        box-shadow: 0 5px 18px rgba(23, 36, 31, .045); margin: .5rem 0 1rem;
+      }
+      .condition-card.warning { border-left-color: #d99000; }
+      .condition-card.alert { border-left-color: #d04437; }
+      .condition-card.info { border-left-color: #5f7897; }
+      .condition-top { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+      .condition-label { color: var(--muted); font-size: .72rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+      .condition-title { color: var(--ink); font-size: clamp(1.45rem, 2.8vw, 2rem); font-weight: 760; line-height: 1.2; margin: .25rem 0 .45rem; }
+      .condition-detail { color: #43534b; font-size: .98rem; margin: 0; }
+      .condition-action { color: var(--muted); font-size: .86rem; margin: .85rem 0 0; padding-top: .75rem; border-top: 1px solid #edf1ee; }
+      .condition-badge {
+        flex: 0 0 auto; border-radius: 999px; padding: .4rem .7rem; font-size: .73rem;
+        font-weight: 750; letter-spacing: .04em; text-transform: uppercase;
+        color: var(--green); background: var(--green-bg);
+      }
+      .condition-card.warning .condition-badge { color: var(--amber); background: var(--amber-bg); }
+      .condition-card.alert .condition-badge { color: var(--red); background: var(--red-bg); }
+      .condition-card.info .condition-badge { color: var(--blue); background: var(--blue-bg); }
+      [data-testid="stMetric"] {
+        background: var(--surface); border: 1px solid var(--line); border-radius: 13px;
+        padding: .9rem 1rem; box-shadow: 0 3px 12px rgba(23, 36, 31, .025);
+      }
+      [data-testid="stMetricLabel"] p { color: var(--muted); font-size: .8rem; font-weight: 650; }
+      [data-testid="stMetricValue"] { color: var(--ink); font-size: 1.45rem; }
+      [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] { gap: 1rem; }
+      .section-heading { font-size: 1.03rem; font-weight: 720; margin: .85rem 0 .15rem; }
+      .threshold-note { color: var(--muted); font-size: .78rem; margin-top: -.2rem; }
+      .stPlotlyChart, [data-testid="stLineChart"] {
+        border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+        padding: .4rem; box-shadow: 0 3px 12px rgba(23, 36, 31, .025);
+      }
+      [data-testid="stSidebar"] { background: var(--surface); }
+      [data-testid="stSidebar"] p { color: var(--muted); }
+      footer { visibility: hidden; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -45,43 +126,14 @@ def display(value: float | None, digits: int, suffix: str) -> str:
     return f"{number:.{digits}f} {suffix}" if math.isfinite(number) else "—"
 
 
-def trend_label(samples: list[float]) -> str:
-    """Describe recent movement; this is not a fault threshold or diagnosis."""
-    if len(samples) < 12:
-        return "Collecting readings for trend analysis"
-    previous = median(samples[-12:-6])
-    recent = median(samples[-6:])
-    scale = max(abs(previous), 0.05)
-    change_pct = (recent - previous) / scale * 100
-    if change_pct > 10:
-        direction = "rising"
-    elif change_pct < -10:
-        direction = "falling"
-    else:
-        direction = "steady"
-    return f"{direction.capitalize()} ({change_pct:+.0f}% vs previous 6 samples)"
-
-
-def valid_samples(history: list[dict], field: str) -> list[float]:
-    values = []
-    for row in history:
-        try:
-            value = float(row[field])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if math.isfinite(value):
-            values.append(value)
-    return values
-
-
 def assess_motor_condition(
     sensor_status: dict[str, bool | None],
     vibration_ms2: float,
     voltage_v: float,
     current_load_ratio: float,
     current_baseline_supported: bool,
-) -> tuple[str, str, str]:
-    """Return a rule-based prototype condition, severity, and reason."""
+) -> tuple[str, str, str, str]:
+    """Return a concise status, severity, explanation, and next step."""
     failed = [
         name
         for key, name in (("adxl345", "ADXL345"), ("ina219", "INA219"))
@@ -89,265 +141,309 @@ def assess_motor_condition(
     ]
     if failed:
         return (
-            "Condition unavailable — sensor fault",
-            "error",
-            f"{', '.join(failed)} reported a fault, so the motor condition cannot be assessed reliably.",
+            "Sensor check required",
+            "alert",
+            f"{', '.join(failed)} is not reporting reliably, so motor condition cannot be assessed.",
+            "Inspect sensor power, shared ground, I²C wiring, and mounting before relying on this reading.",
         )
     if sensor_status.get("adxl345") is not True or sensor_status.get("ina219") is not True:
         return (
-            "Condition unknown — sensor status unavailable",
+            "Checking monitoring system",
             "info",
-            "Waiting for valid ADXL345 and INA219 readings.",
+            "Waiting for valid vibration and electrical measurements.",
+            "Keep the motor unloaded while the sensors and current baseline initialize.",
         )
     if not math.isfinite(voltage_v):
         return (
-            "Condition unknown — motor voltage unavailable",
+            "Motor supply unavailable",
             "info",
-            "INA219 bus voltage is not available in this sample.",
+            "The current sample does not contain a valid motor-supply voltage.",
+            "Check the motor supply and INA219 voltage path.",
         )
     if voltage_v < 1.0:
         return (
-            "Motor off or supply not detected",
+            "Motor stopped",
             "info",
-            "INA219 bus voltage is below 1.0 V, so a running-motor condition cannot be assessed.",
+            "The monitored motor supply is below the running threshold.",
+            "Start the motor safely to assess its operating condition.",
         )
     if not math.isfinite(vibration_ms2):
         return (
-            "Condition unknown — vibration reading unavailable",
+            "Condition unavailable",
             "info",
-            "No valid vibration reading is available.",
+            "No valid vibration measurement is available.",
+            "Check that the accelerometer is firmly mounted and reporting samples.",
         )
+
     vibration_alert = vibration_ms2 >= VIBRATION_ALERT_MS2
     current_alert = (
         math.isfinite(current_load_ratio)
         and current_load_ratio >= CURRENT_ALERT_MULTIPLIER
     )
-    if vibration_alert or current_alert:
-        reasons = []
-        if vibration_alert:
-            reasons.append(f"vibration {vibration_ms2:.2f} m/s²")
-        if current_alert:
-            reasons.append(f"current {current_load_ratio:.2f}× unloaded baseline")
-        if current_alert and vibration_alert:
-            title = "Possible overload — high current and vibration"
-        elif current_alert:
-            title = "Possible overload — current sharply elevated"
-        else:
-            title = "High vibration — inspect motor"
-        return (
-            title,
-            "error",
-            (
-                f"Alert indicators: {', '.join(reasons)}. Stop and inspect if unexpected. "
-                "The current comparison is relative to startup baseline, not the motor's rated limit."
-            ),
-        )
     vibration_warning = vibration_ms2 >= VIBRATION_WARNING_MS2
     current_warning = (
         math.isfinite(current_load_ratio)
         and current_load_ratio >= CURRENT_WARNING_MULTIPLIER
     )
-    if vibration_warning or current_warning:
-        reasons = []
-        if vibration_warning:
-            reasons.append(f"vibration {vibration_ms2:.2f} m/s²")
-        if current_warning:
-            reasons.append(f"current {current_load_ratio:.2f}× unloaded baseline")
+    if vibration_alert or current_alert:
+        indicators = []
+        if vibration_alert:
+            indicators.append(f"vibration is {vibration_ms2:.2f} m/s²")
+        if current_alert:
+            indicators.append(f"current is {current_load_ratio:.2f}× the unloaded baseline")
         return (
-            "Load or vibration rising — maintenance check recommended",
+            "Possible overload",
+            "alert",
+            f"Alert threshold reached: {' and '.join(indicators)}.",
+            "Stop increasing the load. If the rise is unexpected, stop the motor and inspect the setup.",
+        )
+    if vibration_warning or current_warning:
+        indicators = []
+        if vibration_warning:
+            indicators.append(f"vibration is {vibration_ms2:.2f} m/s²")
+        if current_warning:
+            indicators.append(f"current is {current_load_ratio:.2f}× the unloaded baseline")
+        return (
+            "Maintenance check recommended",
             "warning",
-            (
-                f"Warning indicators: {', '.join(reasons)}. Compare with a repeatable known-good run."
-            ),
+            f"Early warning: {' and '.join(indicators)} is above its demonstration range.",
+            "Check motor mounting, load, alignment, and repeat the same test condition for comparison.",
         )
     if not math.isfinite(current_load_ratio):
         if not current_baseline_supported:
             return (
-                "Current-load diagnosis unavailable — update ESP32 firmware",
+                "Current diagnosis unavailable",
                 "info",
-                "Upload the latest ADXL345 streaming sketch to enable no-load current baseline monitoring.",
+                "The connected firmware does not provide the unloaded-current baseline.",
+                "Update the ESP32 sketch to enable current-based load assessment.",
             )
         return (
-            "Vibration within demo limit — current baseline pending",
+            "Capturing baseline",
             "info",
-            "Keep the motor unloaded while the ESP32 captures its startup current baseline; then apply load gradually.",
+            "The motor is running, but its no-load current baseline is not ready yet.",
+            "Keep the motor unloaded until the first baseline reading is available.",
         )
     return (
-        "Baseline ready — no alert currently active",
-        "success",
-        (
-            f"Vibration {vibration_ms2:.2f} m/s²; current {current_load_ratio:.2f}× unloaded baseline. "
-            "No configured alert is active; this is not a validated diagnosis."
-        ),
+        "Healthy within configured limits",
+        "healthy",
+        f"No configured alert is active. Vibration is {vibration_ms2:.2f} m/s² and current is {current_load_ratio:.2f}× baseline.",
+        "Continue monitoring. This prototype status is based on demonstration thresholds, not a certified motor-health assessment.",
     )
+
+
+def recent_trend(values: list[float]) -> str:
+    """Small descriptive trend cue; deliberately not a diagnosis."""
+    values = [value for value in values if math.isfinite(value)]
+    if len(values) < 12:
+        return "Trend building"
+    previous = median(values[-12:-6])
+    recent = median(values[-6:])
+    denominator = max(abs(previous), 0.05)
+    change = (recent - previous) / denominator * 100
+    if change > 10:
+        return f"Rising · {change:+.0f}%"
+    if change < -10:
+        return f"Falling · {change:+.0f}%"
+    return "Stable"
+
+
+def valid_values(history: list[dict], field: str) -> list[float]:
+    result = []
+    for row in history:
+        try:
+            value = float(row[field])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            result.append(value)
+    return result
 
 
 def render_dashboard() -> None:
     data = monitor.snapshot()
     status = data["status"]
-    connected = status == "Connected"
-    reconnecting = status == "Reconnecting"
     latest = data["latest"] or {}
     history = data["history"]
     sensor_status = data["sensor_status"]
     sample_age = data.get("sample_age_s")
     sample_fresh = sample_age is not None and sample_age <= 5.0
-    readings_live = connected and sample_fresh
-    sample_age_text = (
-        f"{sample_age:.1f}s ago" if sample_age is not None else "not received yet"
-    )
+    readings_live = status == "Connected" and sample_fresh
+
+    link_states = {
+        "Connected": ("Connected", "dot-green"),
+        "Reconnecting": ("Reconnecting", "dot-amber"),
+        "Waiting": ("Not connected", "dot-gray"),
+    }
+    link_label, link_dot = link_states.get(status, ("Not connected", "dot-gray"))
+    if status == "Connected" and latest and not sample_fresh:
+        link_label, link_dot = "Data delayed", "dot-amber"
+
+    title_col, link_col = st.columns([3.5, 1.2], vertical_alignment="center")
+    with title_col:
+        st.markdown('<div class="page-kicker">Condition monitoring</div>', unsafe_allow_html=True)
+        st.title("Electric motor")
+        st.markdown('<div class="page-subtitle">Fault indicators and operating trends</div>', unsafe_allow_html=True)
+    with link_col:
+        st.markdown(
+            f'<div class="link-pill"><span class="dot {link_dot}"></span>{html.escape(link_label)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if latest:
+        try:
+            vibration_ms2 = float(latest.get("vibration_rms_g")) * STANDARD_GRAVITY
+        except (TypeError, ValueError):
+            vibration_ms2 = math.nan
+        try:
+            voltage_v = float(latest.get("voltage_v"))
+        except (TypeError, ValueError):
+            voltage_v = math.nan
+        try:
+            current_load_ratio = float(latest.get("current_load_ratio"))
+        except (TypeError, ValueError):
+            current_load_ratio = math.nan
+        current_baseline_supported = bool(latest.get("current_baseline_supported", False))
+
+        condition, severity, explanation, action = assess_motor_condition(
+            sensor_status,
+            vibration_ms2,
+            voltage_v,
+            current_load_ratio,
+            current_baseline_supported,
+        )
+        if readings_live:
+            shown_condition = condition
+            badge = "Live assessment"
+            display_severity = severity
+            shown_explanation = explanation
+            shown_action = action
+        elif status == "Connected":
+            shown_condition = "Data delayed"
+            badge = "Last known status: " + condition
+            display_severity = "warning"
+            shown_explanation = "No new sensor sample has arrived recently; the values below are retained from the last sample."
+            shown_action = "Check that the ESP32 is still sampling. Treat this as historical status until fresh data resumes."
+        else:
+            shown_condition = "ESP32 connection lost"
+            badge = "Last known status: " + condition
+            display_severity = "warning"
+            shown_explanation = "Live assessment paused. The dashboard is retaining the last received readings."
+            shown_action = "Reconnect this computer to the MotorMonitor Wi-Fi network; the dashboard will retry automatically."
+
+        severity_class = {"healthy": "healthy", "warning": "warning", "alert": "alert", "info": "info"}.get(display_severity, "info")
+        badge_text = "Live" if readings_live else "Last known"
+        st.markdown(
+            f"""
+            <section class="condition-card {severity_class}">
+              <div class="condition-top">
+                <div>
+                  <div class="condition-label">Motor health status</div>
+                  <div class="condition-title">{html.escape(shown_condition)}</div>
+                </div>
+                <span class="condition-badge">{html.escape(badge_text)}</span>
+              </div>
+              <p class="condition-detail">{html.escape(shown_explanation)}</p>
+              <p class="condition-action"><strong>Recommended action:</strong> {html.escape(shown_action)}</p>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <section class="condition-card info">
+              <div class="condition-top"><div>
+                <div class="condition-label">Motor health status</div>
+                <div class="condition-title">Waiting for live measurements</div>
+              </div><span class="condition-badge">Connecting</span></div>
+              <p class="condition-detail">The dashboard will show a condition as soon as it receives the ESP32 sensor data.</p>
+              <p class="condition-action"><strong>Next step:</strong> Join the MotorMonitor Wi-Fi network and keep the ESP32 powered.</p>
+            </section>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    if latest:
+        try:
+            vibration_g = float(latest.get("vibration_rms_g"))
+            vibration_ms2 = vibration_g * STANDARD_GRAVITY
+        except (TypeError, ValueError):
+            vibration_g, vibration_ms2 = math.nan, math.nan
+        current = latest.get("current_a")
+        temperature = latest.get("temperature_c")
+        current_ratio = latest.get("current_load_ratio")
+        try:
+            current_ratio = float(current_ratio)
+        except (TypeError, ValueError):
+            current_ratio = math.nan
+
+        st.markdown('<div class="section-heading">Key measurements</div>', unsafe_allow_html=True)
+        value_columns = st.columns(3)
+        value_columns[0].metric("Vibration RMS", display(vibration_ms2, 2, "m/s²"))
+        value_columns[1].metric("Motor current", display(current, 3, "A"))
+        value_columns[2].metric("Motor temperature", display(temperature, 1, "°C"))
+        if math.isfinite(current_ratio):
+            ratio_note = f"Current is {current_ratio:.2f}× the captured no-load baseline."
+        elif latest.get("current_baseline_supported"):
+            ratio_note = "No-load current baseline is still being captured."
+        else:
+            ratio_note = "Relative current comparison is unavailable with the current firmware."
+        voltage_label = display(latest.get("voltage_v"), 2, "V")
+        st.caption(f"Motor supply: {voltage_label}  ·  {ratio_note}")
+
+        st.markdown('<div class="section-heading">Operating trends</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="threshold-note">Recent samples · warning/alert references use demonstration thresholds, not certified motor limits.</div>',
+            unsafe_allow_html=True,
+        )
+        if history:
+            frame = pd.DataFrame(history).set_index("time").tail(120)
+            frame["Vibration · m/s²"] = frame["vibration_rms_g"] * STANDARD_GRAVITY
+            frame["Current · A"] = frame["current_a"]
+            chart_cols = st.columns(2)
+            with chart_cols[0]:
+                st.caption(f"VIBRATION  ·  {recent_trend(valid_values(history, 'vibration_rms_g'))}")
+                values = frame[["Vibration · m/s²"]].dropna()
+                if values.empty:
+                    st.info("Waiting for vibration samples.")
+                else:
+                    st.line_chart(values, height=250, y_label="m/s²", color="#23845a")
+            with chart_cols[1]:
+                st.caption(f"MOTOR CURRENT  ·  {recent_trend(valid_values(history, 'current_a'))}")
+                values = frame[["Current · A"]].dropna()
+                if values.empty:
+                    st.info("Waiting for current samples.")
+                else:
+                    st.line_chart(values, height=250, y_label="A", color="#2864b4")
+        else:
+            st.info("Trend charts will appear when the first samples arrive.")
+
+        if not readings_live:
+            age = f"{sample_age:.1f} seconds ago" if sample_age is not None else "unknown time"
+            st.caption(f"Last sensor sample received {age}. Values are retained but are not live.")
+    else:
+        st.info("Connect the dashboard computer to the ESP32 Wi-Fi to begin monitoring.")
 
     with st.sidebar:
-        st.header("ESP32 connection")
-        if connected:
-            st.success("Connected over Wi‑Fi")
-            st.caption(f"{data['device']} · {data['firmware']}")
-            st.caption(f"Live link: {data['endpoint']}")
-        elif reconnecting:
-            st.warning("Reconnecting · brief Wi‑Fi interruption")
-            st.caption(f"Last ESP32 response: {data['response_age_s']:.1f}s ago")
+        st.subheader("Connection details")
+        if status == "Connected":
+            st.success("ESP32 reachable over Wi-Fi")
+        elif status == "Reconnecting":
+            st.warning("Reconnecting to ESP32")
         else:
-            st.warning("Waiting for the ESP32")
-            st.markdown(
-                "1. Connect this computer to **MotorMonitor** Wi‑Fi.\n"
-                "2. Password: **motorlab24**\n"
-                "3. Keep the computer on that network; it has no internet access.\n"
-                "4. Leave this dashboard open; it reconnects automatically."
-            )
-            st.caption("ESP32 address: 192.168.4.1")
-            st.caption(
-                "If MotorMonitor is missing from the Wi‑Fi list, check ESP32 power, press EN/RESET once, "
-                "and confirm the 115200-baud boot log says the access point is ready."
-            )
-        st.caption(f"Latest sensor sample: {sample_age_text}")
+            st.info("Waiting for ESP32")
+        st.caption(f"Device: {data['device'] or 'ESP32'}")
+        st.caption(f"Firmware: {data['firmware'] or 'not identified'}")
+        st.code(data["endpoint"], language=None)
+        st.caption("Join the MotorMonitor Wi-Fi network on this computer. USB is used to upload firmware, not for live dashboard data.")
         if data["error"]:
-            with st.expander("Connection details"):
+            with st.expander("Technical connection message"):
                 st.code(data["error"], language=None)
-        st.divider()
-        st.caption("USB is only needed to upload firmware. Sensor readings reach this dashboard over Wi‑Fi.")
 
-    st.title("⚙️ Edge-AI Electric Motor Fault Diagnosis")
-    st.caption("Live measurements from the ESP32 sensor system")
-
-    if readings_live:
-        st.success("Live connection active · fresh sensor samples are arriving from the ESP32.")
-    elif connected and latest:
-        st.warning("ESP32 Wi‑Fi is reachable, but no new sensor sample has arrived for over 5 seconds.")
-    elif connected:
-        st.info("ESP32 is reachable · waiting for the first sensor sample.")
-    elif reconnecting:
-        st.warning("Reconnecting to the ESP32. The last values are kept on screen temporarily.")
-    else:
-        if latest:
-            st.warning("ESP32 is not reachable. Values below are the last received sample, not live readings.")
-        else:
-            st.info("Waiting for Wi‑Fi telemetry. The dashboard will fill in automatically when the ESP32 is reachable.")
-
-    st.subheader("Current readings" if readings_live else "Last readings (may be stale)")
-    vibration_g = latest.get("vibration_rms_g")
-    try:
-        vibration_ms2 = float(vibration_g) * STANDARD_GRAVITY
-    except (TypeError, ValueError):
-        vibration_ms2 = math.nan
-    try:
-        voltage_v = float(latest.get("voltage_v"))
-    except (TypeError, ValueError):
-        voltage_v = math.nan
-    try:
-        current_load_ratio = float(latest.get("current_load_ratio"))
-    except (TypeError, ValueError):
-        current_load_ratio = math.nan
-    current_baseline_supported = bool(latest.get("current_baseline_supported", False))
-
-    condition_title, condition_level, condition_detail = assess_motor_condition(
-        sensor_status,
-        vibration_ms2,
-        voltage_v,
-        current_load_ratio,
-        current_baseline_supported,
-    )
-    st.subheader("Motor condition")
-    if readings_live:
-        getattr(st, condition_level)(condition_title)
-        st.caption(condition_detail)
-    elif latest:
-        st.warning(f"Last known: {condition_title} · sample {sample_age_text}; this is not a live assessment.")
-        st.caption(condition_detail)
-    else:
-        st.info("Condition unknown · waiting for a valid live sensor sample.")
     st.caption(
-        "Demonstration rules: vibration warning at 0.15 m/s², alert at 0.30 m/s²; "
-        "current warning at 1.5× and possible-overload alert at 2× the unloaded baseline. "
-        "These are not calibrated motor limits."
+        "Prototype decision support only. Healthy means no configured demonstration threshold is active; "
+        "it is not a certified or calibrated diagnosis."
     )
-
-    metric_columns = st.columns(4)
-    metric_columns[0].metric("Vibration RMS", display(vibration_ms2, 2, "m/s²"))
-    metric_columns[1].metric("Motor voltage", display(latest.get("voltage_v"), 2, "V"))
-    metric_columns[2].metric("Motor current", display(latest.get("current_a"), 3, "A"))
-    metric_columns[3].metric("Probe temperature", display(latest.get("temperature_c"), 2, "°C"))
-
-    status_columns = st.columns(2)
-    for col, key, label in zip(
-        status_columns[:2],
-        ("adxl345", "ina219"),
-        ("ADXL345 vibration", "INA219 voltage/current"),
-    ):
-        state = sensor_status.get(key)
-        label_prefix = "Live" if readings_live else "Last known"
-        if state is True:
-            col.success(f"{label_prefix} · {label}: OK")
-        elif state is False:
-            col.error(f"{label_prefix} · {label}: check")
-        else:
-            col.info(f"{label_prefix} · {label}: waiting")
-
-    st.subheader("Live trends")
-    if history:
-        frame = pd.DataFrame(history).set_index("time").tail(120)
-        frame["vibration_rms_ms2"] = frame["vibration_rms_g"] * STANDARD_GRAVITY
-        left, right = st.columns(2)
-        for col, title, field, unit in (
-            (left, "Vibration RMS", "vibration_rms_ms2", "m/s²"),
-            (right, "Motor current", "current_a", "A"),
-            (left, "Motor voltage", "voltage_v", "V"),
-            (right, "Probe temperature", "temperature_c", "°C"),
-        ):
-            with col:
-                st.markdown(f"**{title} ({unit})**")
-                series = frame[[field]].dropna()
-                if series.empty:
-                    st.caption("No valid readings received yet.")
-                else:
-                    st.line_chart(series, height=210, y_label=unit)
-    else:
-        st.caption("Graphs start drawing as soon as live samples arrive.")
-
-    st.subheader("Recent analysis")
-    if len(history) >= 12:
-        analysis_columns = st.columns(3)
-        for col, field, label, unit in zip(
-            analysis_columns,
-            ("vibration_rms_g", "current_a", "temperature_c"),
-            ("Vibration", "Current", "Temperature"),
-            ("g", "A", "°C"),
-        ):
-            with col:
-                col.markdown(f"**{label}**")
-                col.write(trend_label(valid_samples(history, field)))
-    else:
-        st.caption("Trend comparison appears after 12 valid samples. It describes recent movement; it is not a calibrated fault verdict.")
-
-    if history:
-        last_time = history[-1]["time"].astimezone().strftime("%H:%M:%S")
-        st.caption(f"Last sample received at {last_time} · {sample_age_text} · {data['valid_rows']} samples received")
-    if data.get("restart_count", 0):
-        st.warning(
-            "The ESP32 uptime restarted during this dashboard session. If that lines up with starting the motor, "
-            "check the ESP32 supply and motor wiring for voltage dips or electrical noise; this dashboard detects "
-            "the reboot but cannot identify its cause by itself."
-        )
-    st.caption("Readings are shown as sent by the sensors. Calibration and fault limits have not been applied here.")
 
 
 @st.fragment(run_every=1.0)

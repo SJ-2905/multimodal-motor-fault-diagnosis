@@ -19,7 +19,7 @@ This document gives a student or reviewer the background needed to understand th
 | INA219 breakout | Measures bus voltage and shunt current when the motor supply is routed through its VIN+ and VIN− terminals | I²C; commonly `0x40` |
 | DS18B20 waterproof probe | Measures temperature near the motor or test point | OneWire on GPIO4 with 4.7 kΩ DATA-to-3.3 V pull-up |
 | Green, yellow, red LEDs | Local status indication from prototype sensor/vibration/supply rules | ESP32 GPIO25, GPIO26, GPIO27 respectively |
-| Laptop dashboard | Displays current values, sensor state, charts and threshold-based condition text | Streamlit over HTTP/Wi-Fi |
+| Laptop dashboard | Shows one condition assessment, recommended action, key readings and vibration/current trends | Streamlit over HTTP/Wi-Fi |
 
 The earlier MPU6050 was replaced by the ADXL345 after repeated detection inconsistencies between an I²C bus-check sketch and the full streaming program. Historical MPU logs should not be confused with the active ADXL345 firmware.
 
@@ -33,9 +33,24 @@ The earlier MPU6050 was replaced by the ADXL345 after repeated detection inconsi
 6. The laptop's Streamlit dashboard polls the ESP32 directly over Wi-Fi. USB serial is used for programming and optional diagnostics, not for the dashboard's live data path.
 7. Once motor bus voltage is present, it waits 5 seconds and collects five current readings while unloaded; their median becomes the running current baseline. A negative or below-0.02 A baseline is rejected. Firmware publishes baseline and current-to-baseline ratio in addition to the four measured values.
 8. It drives status LEDs using simple prototype rules. Vibration at 0.15 m/s² is the yellow warning and 0.30 m/s² is the red alert. Current at 1.5× unloaded baseline is yellow; 2× is red and labelled possible overload. A warning/alert must persist for three consecutive sample windows, while ADXL345/INA219 faults are red and absent motor bus voltage is yellow. The LEDs are mutually exclusive. Temperature does not control them.
-9. The dashboard's “Motor condition” panel interprets these vibration cutoffs, the current ratio, sensor availability, and supply presence. It reports maintenance check, high vibration, or possible overload; offline samples are labelled last-known, not live.
+9. The dashboard leads with one prominent health-state card and a recommended action. It uses the vibration cutoffs, relative current ratio, core sensor availability, and motor supply presence to show **Healthy within configured limits**, **Maintenance check recommended**, **Possible overload**, **Sensor check required**, **Motor stopped**, or an initializing/unavailable state. It then shows only vibration RMS, motor current, temperature, and two recent trends. ESP32 connection details are collapsed in the sidebar; DS18B20 dropouts do not appear as a motor fault. Stale/offline values are clearly labelled last-known rather than live.
 
-The vibration cutoffs and current multipliers are demonstration thresholds. They are not derived from the motor manufacturer's limits, an ISO vibration severity assessment, a calibrated current limit, or a labelled fault dataset. The current ratio is relative to a no-load baseline; a 2× rise is not, by itself, proof that the rated overload limit has been exceeded. “No configured fault indicator” means only that these prototype rules were not crossed; it does not prove the motor is healthy.
+The vibration cutoffs and current multipliers are demonstration thresholds. They are not derived from the motor manufacturer's limits, an ISO vibration severity assessment, a calibrated current limit, or a labelled fault dataset. The current ratio is relative to a no-load baseline; a 2× rise is not, by itself, proof that the rated overload limit has been exceeded. The dashboard phrase “Healthy within configured limits” means only that these prototype rules were not crossed; it does not prove the motor is healthy or certify industrial condition.
+
+### Dashboard condition labels
+
+The dashboard does not run the repository's synthetic-data Random Forest. Its motor-health label is an explicit rules-based interpretation of live telemetry:
+
+| Dashboard label | Prototype rule or meaning |
+|---|---|
+| Healthy within configured limits | ADXL345 and INA219 are reporting, motor supply is present, a current baseline is ready, and vibration/current are below their warning cutoffs. This is not a certification. |
+| Maintenance check recommended | Vibration reaches 0.15 m/s² or current reaches 1.5× the no-load baseline. |
+| Possible overload | Vibration reaches 0.30 m/s² or current reaches 2× the no-load baseline. |
+| Sensor check required | ADXL345 or INA219 reports a failure; no motor condition is inferred from an unreliable measurement. |
+| Motor stopped | INA219 motor-supply reading is below 1.0 V. |
+| Capturing baseline / diagnosis unavailable | The firmware has not established the relative-current baseline, or it does not expose that telemetry field. |
+
+The main page uses one condition card, a concise recommended action, vibration/current/temperature readings, and two trend charts. Connection information is in the collapsed sidebar. A held DS18B20 value remains available without making a brief probe interruption look like a motor failure. When the ESP32 link or sensor samples become stale, the page clearly marks the readings and condition as last-known. The word “overload” is qualified as **possible** because the comparison is only a demo ratio, not the motor's manufacturer-rated current limit.
 
 ## Hardware and wiring reference
 
@@ -89,7 +104,7 @@ On a typical solderless breadboard, A–E holes on one numbered row are connecte
 | `firmware/esp32_adxl345_stream/esp32_adxl345_stream.ino` | Active intended firmware: ADXL345 + INA219 + DS18B20, LEDs, Wi-Fi AP, health route and telemetry JSON |
 | `firmware/adxl345_static_calibration/adxl345_static_calibration.ino` | Diagnostic six-orientation ADXL345 calibration sketch; flashing it replaces the Wi-Fi streaming sketch until the latter is uploaded again |
 | `firmware/esp32_motor_monitor/esp32_motor_monitor.ino` | Legacy MPU6050/USB-serial sketch, not the active configuration |
-| `app.py` | Streamlit dashboard, condition panel, current values and trend charts |
+| `app.py` | Streamlit condition-first dashboard, recommended action, key readings and vibration/current trend charts |
 | `wifi_monitor.py` | Background HTTP polling, JSON validation, reconnect/freshness status and bounded sample history |
 | `requirements.txt` | Dependencies needed to run the dashboard |
 | `requirements-model.txt`, `train_model.py`, `data/`, `models/`, `reports/` | Separate earlier synthetic-data machine-learning experiment; not used by the live dashboard |
