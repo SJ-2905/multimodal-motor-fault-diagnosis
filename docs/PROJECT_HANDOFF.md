@@ -57,7 +57,7 @@ INA219 VIN+/VIN− ── motor battery/load current path  │
 
 1. The ADXL345 supplies acceleration events over I²C.
 2. Firmware collects 200 events, applies the configured per-axis static bias/scale corrections, removes each axis's mean for the window, and computes the square root of the sum of the three axis variances. It labels this result `vibration_rms_g`. This is a simple short-window acceleration-variation feature; it is not a frequency-spectrum vibration measurement.
-3. INA219's library supplies bus voltage and shunt current. Firmware converts library current from mA to A and applies configurable offset/scale correction. Current is only motor current if the motor supply is physically routed through VIN+ to VIN− and the breakout remains within its rating.
+3. INA219's library supplies bus voltage and shunt current. Firmware converts library current from mA to A, applies configurable offset/scale correction, then captures a median no-load current baseline after a 5-second settle delay and five readings. Telemetry includes the baseline and current/baseline ratio. Current is only motor current if the motor supply is physically routed through VIN+ to VIN− and the breakout remains within its rating.
 4. DallasTemperature/OneWire reads the DS18B20. After its first valid reading, firmware holds the last valid temperature through a probe disconnect and retries discovery/read; it does not make the status LEDs red. Before the first valid temperature, the JSON value is `null`.
 5. ESP32's `WebServer` returns the latest sample as JSON and provides `/health` for reachability. The default SoftAP IP is `192.168.4.1`.
 6. `WifiTelemetryClient` polls every 0.8 s, validates the four fields, stores a maximum of 600 distinct sample IDs, and separates Connected, Reconnecting, and Waiting based on response age. The dashboard redraws every second and graphs the most recent 120 points. The live dashboard transport is Wi-Fi/HTTP; the active sketch does not use Bluetooth.
@@ -136,6 +136,8 @@ Payload shape:
   "vibration_rms_g": 0.0123,
   "voltage_v": 11.8,
   "current_a": 0.24,
+  "current_baseline_a": 0.20,
+  "current_load_ratio": 1.2,
   "temperature_c": 29.5,
   "sensor_status": {
     "adxl345": true,
@@ -145,7 +147,7 @@ Payload shape:
 }
 ```
 
-Numbers in this example are illustrative, not a promised/validated live reading. Failed or non-finite values serialize as JSON `null`. The dashboard expects all four named fields; changing field names requires changing firmware and `wifi_monitor.py` together.
+Numbers in this example are illustrative, not a promised/validated live reading. Failed or non-finite values serialize as JSON `null`. The four sensor fields are required by the dashboard. The current baseline and ratio fields are optional for compatibility with older firmware; without them, the dashboard can assess vibration but cannot classify relative current/load.
 
 ### LED states
 
@@ -153,11 +155,11 @@ The code uses these status states:
 
 | LED | Firmware condition |
 |---|---|
-| Red | Vibration RMS is at least 35 m/s², or ADXL345/INA219 fault |
-| Yellow | Vibration RMS is at least 30 but below 35 m/s², or INA219 bus voltage is below 1.0 V with no red condition |
-| Green | ADXL345/INA219 checks pass, vibration is below 30 m/s², and INA219 bus voltage is at least 1.0 V |
+| Red | ADXL345/INA219 fault, vibration RMS at least 0.30 m/s², or current at least 2× its captured unloaded baseline |
+| Yellow | Vibration RMS at least 0.15 m/s², current at least 1.5× its unloaded baseline, or INA219 bus voltage below 1.0 V when no red condition is active |
+| Green | Main sensor checks pass, motor bus is present, and neither warning nor alert condition is active |
 
-The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. It converts the RMS value from g to m/s² for LED decisions and uses the demonstration thresholds 30 m/s² (yellow) and 35 m/s² (red). The dashboard displays vibration in m/s². These user-selected thresholds are not calibrated or validated motor-fault limits. A single transient ADXL345 read miss does not turn the red LED on. The DS18B20 value holds the last valid sample through a disconnect; its status is hidden from dashboard sensor cards and it never controls the red LED. This means the displayed temperature may be old while the probe is loose. The LEDs do not indicate battery safety or replace a fuse/driver. Red is no longer flashed during startup; LEDs remain off during initialization and then show the motor-sensor state.
+The firmware retries failed ADXL345 / INA219 initialization every 2 seconds. It converts vibration RMS from g to m/s² for the configured 0.15 m/s² warning and 0.30 m/s² alert. A vibration/current condition must remain over its cutoff for three consecutive sample windows before changing the status LED; sensor faults remain red. The three LEDs are mutually exclusive. Once the INA219 bus voltage is at least 1 V, the firmware waits 5 seconds and collects five current readings, using their median as the unloaded baseline. This typically takes about 10–15 seconds after motor power-up because each vibration sample window takes about a second. Keep the motor unloaded during this capture, then add load gradually. Ratios of 1.5× and 2× baseline are relative demonstration cues, not calibrated overload limits or substitutes for the motor's rated current. If the baseline is negative or below 0.02 A, firmware rejects it and reports no current-load ratio; check polarity and make sure current passes through VIN+ to VIN−. The dashboard labels the 2× condition “possible overload” and still treats it as a heuristic. The DS18B20 value holds the last valid sample through a disconnect; it does not control the LEDs. The LEDs do not indicate battery safety or replace a fuse/driver.
 
 ## 6. Clean installation and runbook
 

@@ -12,8 +12,10 @@ from wifi_monitor import WifiTelemetryClient
 
 ESP32_ENDPOINT = os.getenv("ESP32_TELEMETRY_URL", "http://192.168.4.1/api/telemetry")
 STANDARD_GRAVITY = 9.80665
-VIBRATION_WARNING_MS2 = 30.0
-VIBRATION_ALERT_MS2 = 35.0
+VIBRATION_WARNING_MS2 = 0.15
+VIBRATION_ALERT_MS2 = 0.30
+CURRENT_WARNING_MULTIPLIER = 1.5
+CURRENT_ALERT_MULTIPLIER = 2.0
 
 st.set_page_config(
     page_title="Motor Fault Diagnosis",
@@ -73,9 +75,13 @@ def valid_samples(history: list[dict], field: str) -> list[float]:
 
 
 def assess_motor_condition(
-    sensor_status: dict[str, bool | None], vibration_ms2: float, voltage_v: float
+    sensor_status: dict[str, bool | None],
+    vibration_ms2: float,
+    voltage_v: float,
+    current_load_ratio: float,
+    current_baseline_supported: bool,
 ) -> tuple[str, str, str]:
-    """Return a cautious prototype status, severity, and reason from one sample."""
+    """Return a rule-based prototype condition, severity, and reason."""
     failed = [
         name
         for key, name in (("adxl345", "ADXL345"), ("ina219", "INA219"))
@@ -93,42 +99,86 @@ def assess_motor_condition(
             "info",
             "Waiting for valid ADXL345 and INA219 readings.",
         )
-    if not math.isfinite(vibration_ms2):
-        return (
-            "Condition unknown — vibration reading unavailable",
-            "info",
-            "No valid vibration reading is available.",
-        )
-    if vibration_ms2 >= VIBRATION_ALERT_MS2:
-        return (
-            "Alert — high vibration; inspect motor",
-            "error",
-            (
-                f"Vibration is {vibration_ms2:.2f} m/s², at or above the "
-                "35 m/s² demonstration alert threshold. Stop and inspect the setup if unexpected."
-            ),
-        )
-    if vibration_ms2 >= VIBRATION_WARNING_MS2:
-        return (
-            "Maintenance check recommended — elevated vibration",
-            "warning",
-            (
-                f"Vibration is {vibration_ms2:.2f} m/s², at or above the "
-                "30 m/s² demonstration warning threshold. Compare with the motor's known-good baseline."
-            ),
-        )
     if not math.isfinite(voltage_v):
-        return ("Condition unknown — voltage unavailable", "info", "INA219 voltage is not available in this sample.")
+        return (
+            "Condition unknown — motor voltage unavailable",
+            "info",
+            "INA219 bus voltage is not available in this sample.",
+        )
     if voltage_v < 1.0:
         return (
             "Motor off or supply not detected",
             "info",
             "INA219 bus voltage is below 1.0 V, so a running-motor condition cannot be assessed.",
         )
+    if not math.isfinite(vibration_ms2):
+        return (
+            "Condition unknown — vibration reading unavailable",
+            "info",
+            "No valid vibration reading is available.",
+        )
+    vibration_alert = vibration_ms2 >= VIBRATION_ALERT_MS2
+    current_alert = (
+        math.isfinite(current_load_ratio)
+        and current_load_ratio >= CURRENT_ALERT_MULTIPLIER
+    )
+    if vibration_alert or current_alert:
+        reasons = []
+        if vibration_alert:
+            reasons.append(f"vibration {vibration_ms2:.2f} m/s²")
+        if current_alert:
+            reasons.append(f"current {current_load_ratio:.2f}× unloaded baseline")
+        if current_alert and vibration_alert:
+            title = "Possible overload — high current and vibration"
+        elif current_alert:
+            title = "Possible overload — current sharply elevated"
+        else:
+            title = "High vibration — inspect motor"
+        return (
+            title,
+            "error",
+            (
+                f"Alert indicators: {', '.join(reasons)}. Stop and inspect if unexpected. "
+                "The current comparison is relative to startup baseline, not the motor's rated limit."
+            ),
+        )
+    vibration_warning = vibration_ms2 >= VIBRATION_WARNING_MS2
+    current_warning = (
+        math.isfinite(current_load_ratio)
+        and current_load_ratio >= CURRENT_WARNING_MULTIPLIER
+    )
+    if vibration_warning or current_warning:
+        reasons = []
+        if vibration_warning:
+            reasons.append(f"vibration {vibration_ms2:.2f} m/s²")
+        if current_warning:
+            reasons.append(f"current {current_load_ratio:.2f}× unloaded baseline")
+        return (
+            "Load or vibration rising — maintenance check recommended",
+            "warning",
+            (
+                f"Warning indicators: {', '.join(reasons)}. Compare with a repeatable known-good run."
+            ),
+        )
+    if not math.isfinite(current_load_ratio):
+        if not current_baseline_supported:
+            return (
+                "Current-load diagnosis unavailable — update ESP32 firmware",
+                "info",
+                "Upload the latest ADXL345 streaming sketch to enable no-load current baseline monitoring.",
+            )
+        return (
+            "Vibration within demo limit — current baseline pending",
+            "info",
+            "Keep the motor unloaded while the ESP32 captures its startup current baseline; then apply load gradually.",
+        )
     return (
-        "No vibration alert — within demonstration thresholds",
+        "Baseline ready — no alert currently active",
         "success",
-        "No configured vibration alert was crossed in this sample. This is not a validated diagnosis.",
+        (
+            f"Vibration {vibration_ms2:.2f} m/s²; current {current_load_ratio:.2f}× unloaded baseline. "
+            "No configured alert is active; this is not a validated diagnosis."
+        ),
     )
 
 
@@ -203,9 +253,18 @@ def render_dashboard() -> None:
         voltage_v = float(latest.get("voltage_v"))
     except (TypeError, ValueError):
         voltage_v = math.nan
+    try:
+        current_load_ratio = float(latest.get("current_load_ratio"))
+    except (TypeError, ValueError):
+        current_load_ratio = math.nan
+    current_baseline_supported = bool(latest.get("current_baseline_supported", False))
 
     condition_title, condition_level, condition_detail = assess_motor_condition(
-        sensor_status, vibration_ms2, voltage_v
+        sensor_status,
+        vibration_ms2,
+        voltage_v,
+        current_load_ratio,
+        current_baseline_supported,
     )
     st.subheader("Motor condition")
     if readings_live:
@@ -217,8 +276,9 @@ def render_dashboard() -> None:
     else:
         st.info("Condition unknown · waiting for a valid live sensor sample.")
     st.caption(
-        "Rule-based prototype status: vibration warning at 30 m/s², alert at 35 m/s². "
-        "Motor current is displayed but has no calibrated fault threshold."
+        "Demonstration rules: vibration warning at 0.15 m/s², alert at 0.30 m/s²; "
+        "current warning at 1.5× and possible-overload alert at 2× the unloaded baseline. "
+        "These are not calibrated motor limits."
     )
 
     metric_columns = st.columns(4)

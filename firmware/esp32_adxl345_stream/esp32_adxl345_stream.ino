@@ -23,9 +23,16 @@ constexpr uint32_t TEMPERATURE_RETRY_INTERVAL_MS = 2000;
 constexpr uint32_t SENSOR_RETRY_INTERVAL_MS = 2000;
 constexpr uint8_t PERSISTENT_FAILURE_LIMIT = 3;
 constexpr float MOTOR_BUS_PRESENT_THRESHOLD_V = 1.0f;
-// User-selected prototype vibration indicators, expressed in m/s^2.
-constexpr float VIBRATION_WARNING_MS2 = 30.0f;
-constexpr float VIBRATION_ALERT_MS2 = 35.0f;
+// Demonstration thresholds only; confirm against repeatable healthy-motor data.
+constexpr float VIBRATION_WARNING_MS2 = 0.15f;
+constexpr float VIBRATION_ALERT_MS2 = 0.30f;
+constexpr uint8_t CONDITION_CONFIRM_SAMPLES = 3;
+constexpr uint32_t CURRENT_BASELINE_SETTLE_MS = 5000;
+constexpr uint32_t MOTOR_SUPPLY_OFF_RESET_MS = 3000;
+constexpr uint8_t CURRENT_BASELINE_SAMPLE_COUNT = 5;
+constexpr float CURRENT_WARNING_MULTIPLIER = 1.5f;
+constexpr float CURRENT_ALERT_MULTIPLIER = 2.0f;
+constexpr float CURRENT_BASELINE_MIN_A = 0.02f;
 
 // The ESP32 creates a local Wi-Fi network for the dashboard. Change these if
 // you want a different network name/password. Password must be at least 8 chars.
@@ -67,10 +74,20 @@ uint8_t adxlReadFailures = 0;
 float latestVibrationRmsG = NAN;
 float latestVoltageV = NAN;
 float latestCurrentA = NAN;
+float currentBaselineSamples[CURRENT_BASELINE_SAMPLE_COUNT] = {};
+float currentBaselineA = NAN;
+float currentLoadRatio = NAN;
 float latestTemperatureC = NAN;
 bool latestAdxlReadingOK = false;
 bool latestInaOK = false;
 bool temperatureHasValidReading = false;
+bool currentBaselineReady = false;
+bool currentBaselineInvalidWarned = false;
+uint8_t currentBaselineSampleCount = 0;
+uint8_t warningConditionCount = 0;
+uint8_t alertConditionCount = 0;
+uint32_t motorSupplyPresentSinceMs = 0;
+uint32_t motorSupplyMissingSinceMs = 0;
 
 void setStatusLeds(bool green, bool yellow, bool red) {
   digitalWrite(LED_GREEN_PIN, green ? HIGH : LOW);
@@ -81,6 +98,80 @@ void setStatusLeds(bool green, bool yellow, bool red) {
 String jsonNumber(float value, uint8_t digits) {
   if (!isfinite(value)) return "null";
   return String(value, static_cast<unsigned int>(digits));
+}
+
+float medianCurrentBaseline() {
+  float sorted[CURRENT_BASELINE_SAMPLE_COUNT];
+  for (uint8_t i = 0; i < CURRENT_BASELINE_SAMPLE_COUNT; i++) {
+    sorted[i] = currentBaselineSamples[i];
+  }
+  for (uint8_t i = 1; i < CURRENT_BASELINE_SAMPLE_COUNT; i++) {
+    const float value = sorted[i];
+    int8_t j = static_cast<int8_t>(i) - 1;
+    while (j >= 0 && sorted[j] > value) {
+      sorted[j + 1] = sorted[j];
+      j--;
+    }
+    sorted[j + 1] = value;
+  }
+  return sorted[CURRENT_BASELINE_SAMPLE_COUNT / 2];
+}
+
+void updateCurrentBaseline(float busVoltageV, float currentA) {
+  const bool motorSupplyPresent =
+      isfinite(busVoltageV) && busVoltageV >= MOTOR_BUS_PRESENT_THRESHOLD_V;
+  if (!motorSupplyPresent) {
+    if (motorSupplyMissingSinceMs == 0) motorSupplyMissingSinceMs = millis();
+    if (currentBaselineReady &&
+        millis() - motorSupplyMissingSinceMs < MOTOR_SUPPLY_OFF_RESET_MS) {
+      currentLoadRatio = isfinite(currentA) ? currentA / currentBaselineA : NAN;
+      return;
+    }
+    motorSupplyPresentSinceMs = 0;
+    currentBaselineSampleCount = 0;
+    currentBaselineReady = false;
+    currentBaselineInvalidWarned = false;
+    currentBaselineA = NAN;
+    currentLoadRatio = NAN;
+    return;
+  }
+
+  motorSupplyMissingSinceMs = 0;
+  if (motorSupplyPresentSinceMs == 0) motorSupplyPresentSinceMs = millis();
+  if (currentBaselineReady) {
+    currentLoadRatio = isfinite(currentA) ? currentA / currentBaselineA : NAN;
+    return;
+  }
+
+  // Capture only after the motor has run unloaded long enough to pass startup.
+  if (millis() - motorSupplyPresentSinceMs < CURRENT_BASELINE_SETTLE_MS ||
+      !isfinite(currentA)) {
+    currentLoadRatio = NAN;
+    return;
+  }
+
+  currentBaselineSamples[currentBaselineSampleCount++] = currentA;
+  if (currentBaselineSampleCount < CURRENT_BASELINE_SAMPLE_COUNT) return;
+
+  currentBaselineA = medianCurrentBaseline();
+  if (currentBaselineA < CURRENT_BASELINE_MIN_A) {
+    // A near-zero or negative baseline usually means the shunt path/polarity
+    // needs checking. Do not turn it into an overload ratio.
+    currentBaselineA = NAN;
+    currentBaselineSampleCount = 0;
+    currentLoadRatio = NAN;
+    if (!currentBaselineInvalidWarned) {
+      Serial.println("Current baseline invalid; check unloaded motor path through VIN+ to VIN- and polarity");
+      currentBaselineInvalidWarned = true;
+    }
+    return;
+  }
+
+  currentBaselineReady = true;
+  currentLoadRatio = currentA / currentBaselineA;
+  Serial.print("Unloaded current baseline ready: ");
+  Serial.print(currentBaselineA, 3);
+  Serial.println(" A; gradual load test may begin");
 }
 
 void handleTelemetry() {
@@ -96,6 +187,10 @@ void handleTelemetry() {
   json += jsonNumber(latestVoltageV, 3);
   json += ",\"current_a\":";
   json += jsonNumber(latestCurrentA, 4);
+  json += ",\"current_baseline_a\":";
+  json += jsonNumber(currentBaselineReady ? currentBaselineA : NAN, 4);
+  json += ",\"current_load_ratio\":";
+  json += jsonNumber(currentLoadRatio, 3);
   json += ",\"temperature_c\":";
   json += jsonNumber(latestTemperatureC, 2);
   json += ",\"sensor_status\":{\"adxl345\":";
@@ -291,6 +386,7 @@ void loop() {
     voltageV = (measuredVoltageV - INA_BUS_VOLTAGE_OFFSET_V) * INA_BUS_VOLTAGE_SCALE;
     currentA = (measuredCurrentA - INA_CURRENT_OFFSET_A) * INA_CURRENT_SCALE;
   }
+  updateCurrentBaseline(voltageV, currentA);
 
   if (!temperatureOK && millis() - lastTemperatureRetryMs >= TEMPERATURE_RETRY_INTERVAL_MS) {
     lastTemperatureRetryMs = millis();
@@ -323,12 +419,41 @@ void loop() {
 
   // Test indication only: this is not yet a calibrated motor-fault classifier.
   const float vibrationRmsMs2 = vibrationRmsG * STANDARD_GRAVITY;
+  const bool motorPowerPresent =
+      isfinite(voltageV) && voltageV >= MOTOR_BUS_PRESENT_THRESHOLD_V;
+  uint8_t conditionLevel = 0;
+  if (motorPowerPresent) {
+    if (isfinite(vibrationRmsMs2) && vibrationRmsMs2 >= VIBRATION_WARNING_MS2) {
+      conditionLevel = 1;
+    }
+    if (isfinite(vibrationRmsMs2) && vibrationRmsMs2 >= VIBRATION_ALERT_MS2) {
+      conditionLevel = 2;
+    }
+    if (isfinite(currentLoadRatio) && currentLoadRatio >= CURRENT_WARNING_MULTIPLIER) {
+      if (conditionLevel < 1) conditionLevel = 1;
+    }
+    if (isfinite(currentLoadRatio) && currentLoadRatio >= CURRENT_ALERT_MULTIPLIER) {
+      conditionLevel = 2;
+    }
+  }
+
+  if (conditionLevel >= 2) {
+    if (alertConditionCount < CONDITION_CONFIRM_SAMPLES) alertConditionCount++;
+    if (warningConditionCount < CONDITION_CONFIRM_SAMPLES) warningConditionCount++;
+  } else if (conditionLevel == 1) {
+    alertConditionCount = 0;
+    if (warningConditionCount < CONDITION_CONFIRM_SAMPLES) warningConditionCount++;
+  } else {
+    warningConditionCount = 0;
+    alertConditionCount = 0;
+  }
+
   if (!adxlOK || !inaOK || adxlReadFailures >= PERSISTENT_FAILURE_LIMIT ||
-      vibrationRmsMs2 >= VIBRATION_ALERT_MS2) {
-    setStatusLeds(false, false, true);  // red: high vibration or motor-sensor path fault
-  } else if (vibrationRmsMs2 >= VIBRATION_WARNING_MS2 ||
-             voltageV < MOTOR_BUS_PRESENT_THRESHOLD_V) {
-    setStatusLeds(false, true, false);  // yellow: elevated vibration or motor supply not present at INA bus
+      alertConditionCount >= CONDITION_CONFIRM_SAMPLES) {
+    setStatusLeds(false, false, true);  // red: sensor fault or sustained load/vibration alert
+  } else if (warningConditionCount >= CONDITION_CONFIRM_SAMPLES ||
+             !motorPowerPresent) {
+    setStatusLeds(false, true, false);  // yellow: rising load/vibration or motor supply absent
   } else {
     setStatusLeds(true, false, false);  // green: sensors work and voltage is present at INA bus
   }

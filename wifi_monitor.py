@@ -93,6 +93,12 @@ class WifiTelemetryClient:
                 sample = {
                     "time": datetime.now().astimezone(),
                     **{field: _numeric(payload.get(field)) for field in FIELDS},
+                    # Optional additions preserve compatibility with older firmware.
+                    "current_baseline_a": _numeric(payload.get("current_baseline_a")),
+                    "current_load_ratio": _numeric(payload.get("current_load_ratio")),
+                    "current_baseline_supported": (
+                        "current_baseline_a" in payload and "current_load_ratio" in payload
+                    ),
                 }
                 statuses = payload.get("sensor_status", {})
                 if not isinstance(statuses, dict):

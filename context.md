@@ -31,10 +31,11 @@ The earlier MPU6050 was replaced by the ADXL345 after repeated detection inconsi
 4. It keeps the last valid temperature reading after a brief DS18B20 disconnect and retries the probe. The dashboard intentionally does not make a brief probe disconnect look like a motor fault.
 5. It creates a local Wi-Fi access point named `MotorMonitor`, serves JSON telemetry at `http://192.168.4.1/api/telemetry`, and responds to `http://192.168.4.1/health` with `ok`.
 6. The laptop's Streamlit dashboard polls the ESP32 directly over Wi-Fi. USB serial is used for programming and optional diagnostics, not for the dashboard's live data path.
-7. It drives status LEDs using simple prototype rules. Green means the main ADXL345/INA219 paths are available, measured vibration is below 30 m/s², and INA219 bus voltage is at least 1 V. Yellow means vibration is at least 30 and below 35 m/s², or the measured bus voltage is below 1 V when no red condition is active. Red means vibration is at least 35 m/s² or an ADXL345/INA219 fault is present. Temperature does not control these LEDs.
-8. The dashboard's “Motor condition” panel interprets the same configured vibration thresholds, sensor availability, and supply presence. It labels warning-level vibration as needing a maintenance check and high vibration as an alert requiring inspection. Offline samples are labelled last-known, not live.
+7. Once motor bus voltage is present, it waits 5 seconds and collects five current readings while unloaded; their median becomes the running current baseline. A negative or below-0.02 A baseline is rejected. Firmware publishes baseline and current-to-baseline ratio in addition to the four measured values.
+8. It drives status LEDs using simple prototype rules. Vibration at 0.15 m/s² is the yellow warning and 0.30 m/s² is the red alert. Current at 1.5× unloaded baseline is yellow; 2× is red and labelled possible overload. A warning/alert must persist for three consecutive sample windows, while ADXL345/INA219 faults are red and absent motor bus voltage is yellow. The LEDs are mutually exclusive. Temperature does not control them.
+9. The dashboard's “Motor condition” panel interprets these vibration cutoffs, the current ratio, sensor availability, and supply presence. It reports maintenance check, high vibration, or possible overload; offline samples are labelled last-known, not live.
 
-The 30 and 35 m/s² values were chosen as demonstration thresholds at the owner's request. They are not derived from the motor manufacturer's limits, an ISO vibration severity assessment, or a labelled fault dataset. “No vibration alert” means only that these prototype rules were not crossed; it does not prove the motor is healthy. Current is displayed but has no calibrated abnormal-current threshold in this version.
+The vibration cutoffs and current multipliers are demonstration thresholds. They are not derived from the motor manufacturer's limits, an ISO vibration severity assessment, a calibrated current limit, or a labelled fault dataset. The current ratio is relative to a no-load baseline; a 2× rise is not, by itself, proof that the rated overload limit has been exceeded. “No configured fault indicator” means only that these prototype rules were not crossed; it does not prove the motor is healthy.
 
 ## Hardware and wiring reference
 
@@ -108,6 +109,8 @@ The ESP32 telemetry endpoint returns one JSON object with fields similar to:
   "vibration_rms_g": 0.0123,
   "voltage_v": 11.8,
   "current_a": 0.24,
+  "current_baseline_a": 0.20,
+  "current_load_ratio": 1.2,
   "temperature_c": 29.5,
   "sensor_status": {
     "adxl345": true,
@@ -117,7 +120,7 @@ The ESP32 telemetry endpoint returns one JSON object with fields similar to:
 }
 ```
 
-Values above are an interface example, not a recorded or accuracy-validated sample. Failed/non-finite measurements are represented as JSON `null`. `voltage_v` is the INA219 bus reading at VIN− relative to its ground and is not necessarily the battery voltage at VIN+.
+Values above are an interface example, not a recorded or accuracy-validated sample. Failed/non-finite measurements are represented as JSON `null`. `voltage_v` is the INA219 bus reading at VIN− relative to its ground and is not necessarily the battery voltage at VIN+. `current_baseline_a` and `current_load_ratio` are supplied by the new streaming firmware and will be absent if an older sketch is still flashed.
 
 ### Reproducing the software setup
 
@@ -138,6 +141,7 @@ Values above are an interface example, not a recorded or accuracy-validated samp
 
 5. Join the laptop to the ESP32 network `MotorMonitor` (default password `motorlab24`; a no-internet warning is expected). Confirm `http://192.168.4.1/health` returns `ok`, then check `http://192.168.4.1/api/telemetry`.
 6. From the repository root, run `streamlit run app.py`, then open the local URL it prints, normally `http://localhost:8501`.
+7. For a gradual-load demonstration, first run the motor without added load and wait until the dashboard says its current baseline is ready (typically about 10–15 seconds from switching on). Then increase load carefully with a rated, controlled fixture. The LED/status stages are mutually exclusive: green → yellow → red.
 
 Install Python packages while internet is available before joining the ESP32's local-only AP. The dashboard computer must have a network route to the ESP32. If credentials or IP are changed, update the firmware or set `ESP32_TELEMETRY_URL` in the dashboard environment.
 
@@ -152,7 +156,7 @@ This is a concise record of the integration path. Symptoms and causes are separa
 5. **USB serial confusion:** OpenOCD failed to find an FTDI debug device because a debug action was selected without a compatible debug probe; serial upload via esptool succeeded separately. Several garbled serial sessions were associated with baud/serial-monitor confusion and boot logs; they were not, by themselves, proof that sensor values were corrupted. USB is reserved for flashing and diagnostics in the current Wi-Fi architecture.
 6. **Stream behavior:** The legacy system emitted CSV serial rows. The requested direction changed to a direct ESP32 Wi-Fi monitor to avoid needing a serial port for live telemetry. The active firmware now starts its own AP and returns JSON; the laptop runs Streamlit and polls over HTTP.
 7. **Motor supply issues:** The motor did not initially run, voltage at the motor was measured as zero at one point, a 500 mA fuse reportedly blew, and later the motor started after wiring was corrected. The fuse event and unknown stall current remain safety and measurement limitations. There is no verified result showing that the current sensor/shunt is safely sized for the motor under load.
-8. **Status behavior:** The owner requested that temperature probe flicker not trigger a motor fault indication and that the last good temperature remain visible briefly. Firmware now holds the last valid DS18B20 value and excludes temperature from status LEDs. Vibration warning/alert thresholds were then set to 30/35 m/s² for demonstration, and the dashboard condition panel reports them as prototype thresholds.
+8. **Status behavior:** The owner requested that temperature probe flicker not trigger a motor fault indication and that the last good temperature remain visible briefly. Firmware now holds the last valid DS18B20 value and excludes temperature from status LEDs. User-selected vibration cutoffs were lowered to 0.15/0.30 m/s² because earlier 30/35 m/s² values were never reached in the observed runs. Current escalation is now relative to an automatically captured unloaded baseline (1.5× warning, 2× possible-overload alert), with three-window persistence to reduce brief transients.
 
 The `docs/PROJECT_HANDOFF.md` file has the longer troubleshooting checklist and should be consulted before changing the wiring.
 
@@ -163,7 +167,7 @@ The firmware correction constants are neutral by default (zero offsets and unit 
 - **ADXL345:** Follow the six-orientation procedure in `CALIBRATION.md` for static per-axis bias and scale. This does not characterize mounting resonance, vibration frequency response, or fault thresholds.
 - **INA219:** Verify the actual shunt value and current/voltage rating. Compare bus voltage with a trusted meter and current with a suitable series reference at safe known loads. Do not place a multimeter in current mode directly across a supply.
 - **DS18B20:** Compare against a trusted thermometer at stable temperatures; repair intermittent wiring before applying offsets.
-- **Motor condition thresholds:** The current 30/35 m/s² cutoffs are demonstration choices, not a manufacturer recommendation or accepted universal “healthy/faulty” boundaries. Build a repeatable baseline, document sensor mounting and motor load, and validate across multiple runs before drawing conclusions.
+- **Motor condition thresholds:** The 0.15/0.30 m/s² vibration cutoffs and 1.5×/2× current multipliers are demonstration choices, not manufacturer recommendations or universal “healthy/faulty” boundaries. Build a repeatable baseline, document sensor mounting and motor load, and validate across multiple runs before drawing conclusions.
 - **Machine learning:** The repository's separate Random Forest experiment uses synthetic/generated measurements. Its score applies only to that generated dataset and is not evidence of real-motor fault accuracy. The current live dashboard does not use the model's predictions.
 - **Load testing:** Do not intentionally overload or stall the motor without an appropriate controlled fixture and verified fuse, battery, wiring, switch, and INA219 ratings. A casual mechanical brake is not a calibrated dynamometer.
 
